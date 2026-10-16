@@ -1,0 +1,19 @@
+# 本地库、原始响应、缓存。不要把批量抓取结果提交进仓库。
+data/
+*.sqlite
+*.sqlite3
+
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+*.egg-info/
+dist/
+build/
+
+.env
+*.pem
+secrets.toml

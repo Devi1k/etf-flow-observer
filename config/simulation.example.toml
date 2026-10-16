@@ -1,0 +1,24 @@
+# 影子试验参数。空字符串表示还没决定。
+# 不要为了让程序跑起来而填上有利的数。规则变更必须换 version_id，不能把不同版本的损益接在一起。
+
+version_id = ""
+instrument = ""
+entry_timestamp = ""
+order_size = ""
+slippage = ""
+commission = ""
+cash_idle_return = ""
+exit_day_counting = ""
+price_source = ""
+random_seed = ""
+
+# 下面几项是已经写明的规则，不是可以偷偷改的交易优化。
+hold_trading_days = 5
+stacking = false
+extension = false
+allow_trial = false
+
+indicator_definition_id = "v0-five-day-flow-over-start-aum"
+prior_complete_indicators = 120
+percentile = "0.80"
+percentile_method = "hyndman-fan-type-7-strictly-above"
