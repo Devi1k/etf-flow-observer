@@ -29,6 +29,7 @@ CREATE TABLE IF NOT EXISTS raw_fetches (
     fetched_at TEXT NOT NULL,
     network_fetched_at TEXT,
     cache_accessed_at TEXT,
+    request_started_at TEXT,
     attempt_no INTEGER NOT NULL DEFAULT 1,
     from_cache INTEGER NOT NULL,
     error TEXT
@@ -154,10 +155,16 @@ class Store:
         self.conn.row_factory = sqlite3.Row
         self.conn.execute("PRAGMA foreign_keys = ON")
         self.conn.executescript(SCHEMA)
+        self._ensure_column("raw_fetches", "request_started_at", "TEXT")
         self.conn.commit()
 
     def close(self) -> None:
         self.conn.close()
+
+    def _ensure_column(self, table: str, column: str, decl: str) -> None:
+        cols = {row[1] for row in self.conn.execute(f"PRAGMA table_info({table})")}
+        if column not in cols:
+            self.conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {decl}")
 
     def save_raw(
         self,
@@ -176,6 +183,7 @@ class Store:
         content_sha256: str | None = None,
         network_fetched_at: datetime | None = None,
         cache_accessed_at: datetime | None = None,
+        request_started_at: datetime | None = None,
         attempt_no: int = 1,
     ) -> int:
         body_path = existing_body_path
@@ -191,13 +199,18 @@ class Store:
         cache_stamp = (
             cache_accessed_at.isoformat(timespec="seconds") if cache_accessed_at is not None else None
         )
+        request_stamp = (
+            request_started_at.isoformat(timespec="seconds")
+            if request_started_at is not None
+            else None
+        )
         cursor = self.conn.execute(
             """
             INSERT INTO raw_fetches (
                 source_name, fingerprint, method, url, request_body, http_status,
                 body_path, content_sha256, fetched_at, network_fetched_at, cache_accessed_at,
-                attempt_no, from_cache, error
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                request_started_at, attempt_no, from_cache, error
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 source_name,
@@ -211,6 +224,7 @@ class Store:
                 network_stamp,
                 network_stamp,
                 cache_stamp,
+                request_stamp,
                 attempt_no,
                 1 if from_cache else 0,
                 error,

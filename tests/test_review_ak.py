@@ -120,6 +120,56 @@ def test_cache_hit_does_not_rewrite_body_or_extend_ttl(store):
     assert calls["n"] == 2
 
 
+
+def test_http_client_records_response_arrival_not_request_start(store):
+    """transport 内推进时钟时，network_fetched_at 必须是响应完整到达，不是发请求前。"""
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+    sh = ZoneInfo("Asia/Shanghai")
+    start = datetime(2026, 10, 16, 9, 0, 0, tzinfo=sh)
+    arrive = datetime(2026, 10, 16, 9, 0, 5, tzinfo=sh)
+    clock = {"now": start}
+
+    def transport(method, url, headers, body):
+        clock["now"] = arrive
+        return 200, Message(), b'{"ok":true}'
+
+    client = _client(
+        store,
+        transport,
+        ttl=0,
+        clock=lambda: clock["now"],
+    )
+    result = client.send("GET", "https://query.sse.com.cn/commonQuery.do?t=clock", source_name="sse_shares")
+    assert result.request_started_at == start
+    assert result.network_fetched_at == arrive
+    assert result.network_fetched_at > result.request_started_at
+    row = store.conn.execute(
+        "SELECT request_started_at, network_fetched_at FROM raw_fetches WHERE id = ?",
+        (result.raw_id,),
+    ).fetchone()
+    assert row["request_started_at"].startswith("2026-10-16T09:00:00")
+    assert row["network_fetched_at"].startswith("2026-10-16T09:00:05")
+
+
+def test_cache_hit_across_0800_keeps_overnight_not_morning(store):
+    """07:50 网络正文、08:01 缓存命中入库：阶段仍是 overnight，不能误升 morning/权威。"""
+    body_at = shanghai(2026, 10, 16, 7, 50)
+    batch_at = shanghai(2026, 10, 16, 8, 1)
+    point = _share("2026-10-15", "10")
+    point.network_fetched_at = body_at
+    point.observation_available_at = body_at
+    point.cache_accessed_at = batch_at
+    # 批次意图是 morning，但钟点按正文可得时间仍是 overnight
+    result = ingest(store, [point], batch_at, phase="morning")
+    assert result["actions"] == ["created"]
+    row = store.latest_join("510330", "2026-10-15", "shares", "sse_shares")
+    assert row["snapshot_phase"] == "overnight"
+    assert row["authoritative"] == 0
+    assert row["quality_status"] == "overnight_provisional"
+    assert row["observation_available_at"].startswith("2026-10-16T07:50")
+
+
 def test_requested_morning_cannot_upgrade_clock_phase(store):
     early = shanghai(2026, 10, 16, 7, 59)
     phase, note = applied_phase(

@@ -56,6 +56,7 @@ class FetchResult:
     error: str | None
     network_fetched_at: datetime
     cache_accessed_at: datetime | None = None
+    request_started_at: datetime | None = None
 
     def json(self) -> object:
         return json.loads(self.text, parse_float=Decimal, parse_int=Decimal)
@@ -156,6 +157,7 @@ class HttpClient:
         payload = b""
         response_headers = Message()
         raw_id = 0
+        request_started_at = now
         network_at = now
         for attempt in range(1, self.max_retries + 1):
             if self.http_calls >= self.max_http_requests:
@@ -165,8 +167,9 @@ class HttpClient:
             delay = self._attempt_delay(host, attempt)
             if delay > 0:
                 self.sleeper(delay)
-            network_at = self.clock()
-            self.store.mark_host(host, network_at)
+            # 请求开始 ≠ 响应完整到达。transport 里推进时钟时必须能测出这两点不同。
+            request_started_at = self.clock()
+            self.store.mark_host(host, request_started_at)
             self.http_calls += 1
             try:
                 status, response_headers, payload = self._once(
@@ -180,6 +183,7 @@ class HttpClient:
                 last_error = f"{type(exc).__name__}: {exc}"
                 status = None
                 payload = b""
+            network_at = self.clock()
             error = _attempt_error(last_error, status, response_headers)
             raw_id = self.store.save_raw(
                 source_name=source_name,
@@ -195,6 +199,7 @@ class HttpClient:
                 network_fetched_at=network_at,
                 cache_accessed_at=None,
                 attempt_no=attempt,
+                request_started_at=request_started_at,
             )
             retryable = status in {429, 500, 502, 503, 504} or status is None
             if error is None or not retryable or attempt >= self.max_retries:
@@ -214,6 +219,7 @@ class HttpClient:
             error=final_error,
             network_fetched_at=network_at,
             cache_accessed_at=None,
+            request_started_at=request_started_at,
         )
 
     def _attempt_delay(self, host: str, attempt: int) -> float:

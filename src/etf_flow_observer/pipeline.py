@@ -145,9 +145,11 @@ def ingest_points(
 def _ingest_one(store, point: RawPoint, **kwargs):
     now = kwargs["now"]
     day = date.fromisoformat(point.as_of_date)
+    # 阶段按「正文可得时间」判，不用批次 now。跨 08:00 缓存命中仍可能带 07:50 的原文。
+    available = point.observation_available_at or point.network_fetched_at or now
     phase, phase_note = applied_phase(
         day,
-        now,
+        available,
         kwargs["phase_override"],
         morning_start=kwargs["morning_start"],
         session_close=kwargs["session_close"],
@@ -169,7 +171,6 @@ def _ingest_one(store, point: RawPoint, **kwargs):
         original_unit=point.original_unit,
         canonical_value=canonical,
     )
-    available = point.observation_available_at or point.network_fetched_at or now
     result = store.upsert_version(
         fund_code=point.fund_code,
         as_of_date=point.as_of_date,

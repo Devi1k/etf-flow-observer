@@ -16,11 +16,15 @@
 
 `network_fetched_at`、`cache_accessed_at`、`observation_available_at` 分开存。缓存命中不改正文，也不把有效期改成读取时间。入库用该次响应的到达时间，不用整轮任务开始时的同一个 `now`。
 
+补充（c340e2c 之后）：`http_client` 在 `_once` **之前**记 `request_started_at`，在 `_once` **返回之后**再取 `network_fetched_at`。transport 里推进时钟的测试要求这两点不同；不能把发请求时刻当成响应完整到达。
+
 ## B. 接受
 
 `--session` 和 `--phase` 只表示意图。阶段由数据日、当天日历和钟点决定，请求不能把阶段抬成更权威。
 
 配置里的 08:00 只是分界：07:59 仍是 `overnight` 且不权威；08:00 按配置可以标 `morning`。这不是交易所已经发布权威份额的保证。未来日期、周末或休市隔开的日期，即使用 `--phase morning` 也仍是 `future_invalid` 或 `backfill`。
+
+补充：判阶段用「正文可得时间」（`observation_available_at` / `network_fetched_at`），不用批次 `now`。跨 08:00 的缓存命中：07:50 的原文在 08:01 入库仍是 `overnight`，不能误升 `morning` / 权威。
 
 ## C. 接受
 
