@@ -128,7 +128,7 @@ def cmd_status(store: Store, cfg: AppConfig) -> int:
         "SELECT DISTINCT as_of_date FROM observations ORDER BY as_of_date DESC LIMIT 8"
     ).fetchall()
     for row in rows:
-        for line in day_lines(store, row["as_of_date"], now, cfg.stale_after_hours):
+        for line in day_lines(store, row["as_of_date"], now, cfg.stale_after_hours, cfg.closures):
             print(line)
     if not rows:
         print("还没有观察记录。")
@@ -253,7 +253,7 @@ def cmd_smoke(store: Store, cfg: AppConfig, write_report: str) -> int:
     ]
     summaries.append(second)
     _print_summaries(summaries)
-    for line in day_lines(store, target.isoformat(), now, cfg.stale_after_hours):
+    for line in day_lines(store, target.isoformat(), now, cfg.stale_after_hours, cfg.closures):
         print(line)
     if write_report:
         _write_report(Path(write_report), now, target, phase, summaries, store, cfg)
@@ -323,7 +323,7 @@ def _run_sse(store, client, cfg, days: list[date], phase, now, force: bool, use_
         expected_funds=list(SSE_SHARE_CODES),
         expected_series=["shares"],
     )
-    mark_checkpoint(store, SSE, key, summary, now)
+    mark_checkpoint(store, SSE, key, summary, now, start=start, end=end, closures=cfg.closures)
     return summary
 
 
@@ -347,7 +347,7 @@ def _run_szse(store, client, cfg, start, end, phase, now, force: bool, use_cache
         expected_funds=["159919"],
         expected_series=["shares"],
     )
-    mark_checkpoint(store, SZSE, key, summary, now)
+    mark_checkpoint(store, SZSE, key, summary, now, start=start, end=end, closures=cfg.closures)
     return summary
 
 
@@ -416,7 +416,7 @@ def _run_nav(
         expected_funds=[fund],
         expected_series=["unit_nav", "cumulative_nav"],
     )
-    mark_checkpoint(store, source, key, summary, now)
+    mark_checkpoint(store, source, key, summary, now, start=start, end=end, closures=cfg.closures)
     return summary
 
 
@@ -521,7 +521,7 @@ def _write_report(path: Path, now, target: date, phase: str, summaries: list[dic
     lines.append("")
     lines.append("## 这一天的合计判断")
     lines.append("")
-    lines.extend(day_lines(store, target.isoformat(), now, cfg.stale_after_hours))
+    lines.extend(day_lines(store, target.isoformat(), now, cfg.stale_after_hours, cfg.closures))
     lines.append("")
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 

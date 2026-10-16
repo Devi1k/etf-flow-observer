@@ -26,10 +26,16 @@ def parse_decimal(value: object) -> Decimal:
         text = str(value).strip().replace(",", "").replace("，", "").replace(" ", "")
     if text in {"", "--", "null", "None"}:
         raise ObserverError(f"空的或无效的数字: {value!r}")
+    lowered = text.lower()
+    if lowered in {"nan", "+nan", "-nan", "inf", "+inf", "-inf", "infinity", "+infinity", "-infinity"}:
+        raise ObserverError(f"拒绝非有限数字 {value!r}")
     try:
-        return Decimal(text)
+        number = Decimal(text)
     except InvalidOperation as exc:
         raise ObserverError(f"无法解析数字 {value!r}") from exc
+    if not number.is_finite():
+        raise ObserverError(f"拒绝非有限数字 {value!r}")
+    return number
 
 
 def canonical_number(value: Decimal) -> str:
@@ -51,6 +57,8 @@ def as_original_text(value: object) -> str:
 
 def to_shares(value: Decimal, unit: str) -> tuple[Decimal, str]:
     """返回 (标准化份额, 标准化单位)。"""
+    if not value.is_finite() or value < 0:
+        raise ObserverError(f"份额 {value} 不是合法的非负有限数")
     if unit == WAN_FEN:
         return value * SHARES_PER_WAN, FEN
     if unit == FEN:
@@ -61,6 +69,8 @@ def to_shares(value: Decimal, unit: str) -> tuple[Decimal, str]:
 def to_nav_yuan(value: Decimal, unit: str) -> tuple[Decimal, str]:
     if unit != YUAN:
         raise ObserverError(f"净值单位必须是元，收到 {unit!r}")
+    if not value.is_finite() or value <= 0:
+        raise ObserverError(f"净值必须是正的有限数，收到 {value}")
     return value, YUAN
 
 

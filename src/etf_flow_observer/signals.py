@@ -12,7 +12,7 @@ from decimal import Decimal
 
 from etf_flow_observer.errors import ObserverError
 from etf_flow_observer.quality import blocks_executable
-from etf_flow_observer.timing import next_entry_timestamp
+from etf_flow_observer.timing import next_entry_timestamp, previous_weekday
 from etf_flow_observer.universe import FUND_CODES, is_full_universe
 
 
@@ -57,9 +57,15 @@ def require_four(values: dict[str, Decimal | None], what: str) -> None:
         raise ObserverError(f"{what}里 {empty} 没有数，不能把缺失当成 0 再做四只合计。")
 
 
+def denominator_date(window_start: date, closures: set[date]) -> date:
+    """5 日窗口第一天之前的那个交易日。分母用这一天，不用窗口内第一天。"""
+    return previous_weekday(window_start, closures)
+
+
 def aum_at_window_start(shares: dict[str, Decimal | None], unit_navs: dict[str, Decimal | None]) -> Decimal:
-    require_four(shares, "窗口起点份额")
-    require_four(unit_navs, "窗口起点单位净值")
+    """四只（份额 × 单位净值）之和。调用方必须传入窗口开始前一交易日的数，而不是窗口内第一天。"""
+    require_four(shares, "窗口开始前一交易日的份额")
+    require_four(unit_navs, "窗口开始前一交易日的单位净值")
     total = Decimal(0)
     for code in FUND_CODES:
         total += shares[code] * unit_navs[code]  # type: ignore[operator]
@@ -93,16 +99,27 @@ def linear_percentile(values: list[Decimal], q: Decimal) -> Decimal:
     return ordered[lower] + (ordered[upper] - ordered[lower]) * fraction
 
 
-def percentile_80(prior: list[Decimal]) -> Decimal:
+def most_recent_indicators(prior: list[Decimal]) -> list[Decimal]:
+    """`prior` 按时间从旧到新。只用最近 120 个，多出来的更早样本不进入分位。"""
     if len(prior) < 120:
         raise ObserverError(
             "同一口径、且不含当前值的完整 5 日指标不足 120 个，不能计算 80 分位"
         )
-    return linear_percentile(prior, Decimal("0.8"))
+    return list(prior[-120:])
+
+
+def percentile_80(prior: list[Decimal]) -> Decimal:
+    return linear_percentile(most_recent_indicators(prior), Decimal("0.8"))
+
+
+def percentile_80_chronological(samples: list[tuple[date, Decimal]]) -> Decimal:
+    """先按日期排序，再只取最近 120 个。日期相同则保持原顺序。"""
+    ordered = [value for _day, value in sorted(samples, key=lambda item: item[0])]
+    return percentile_80(ordered)
 
 
 def trigger_long(current: Decimal, prior: list[Decimal]) -> bool:
-    """当前指标大于 0，且严格高于此前 120 个同口径指标的 80 分位。"""
+    """当前指标大于 0，且严格高于此前最近 120 个同口径指标的 80 分位。"""
     if len(prior) < 120:
         raise ObserverError("分位窗口还没准备好，不能给出触发结论")
     if current <= 0:

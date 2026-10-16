@@ -80,7 +80,7 @@ def test_efunds_walks_zero_based_pages(store):
         data = {
             "status": 1,
             "message": "success",
-            "data": {"pageSize": 5, "pageIndex": payload["pageIndex"], "total": 6, "data": rows},
+            "data": {"pageSize": 1, "pageIndex": payload["pageIndex"], "total": 2, "data": rows},
         }
         return 200, Message(), json.dumps(data).encode()
 
@@ -89,7 +89,7 @@ def test_efunds_walks_zero_based_pages(store):
         client,
         date(2026, 10, 1),
         date(2026, 10, 16),
-        page_size=5,
+        page_size=150,
         use_cache=False,
     )
     assert batch.errors == []

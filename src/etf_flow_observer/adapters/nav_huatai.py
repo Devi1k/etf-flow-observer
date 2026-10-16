@@ -15,7 +15,7 @@ import re
 import urllib.parse
 from datetime import date
 
-from etf_flow_observer.adapters.common import FetchBatch, RawPoint, in_window
+from etf_flow_observer.adapters.common import FetchBatch, RawPoint, attach_fetch, filter_window
 from etf_flow_observer.errors import ObserverError
 from etf_flow_observer.standardize import as_original_text
 
@@ -159,7 +159,9 @@ def collect_huatai(
         if current != page:
             errors.append(f"华泰柏瑞页码错位：请求 {page}，返回 {current}")
             break
-        points.extend(item for item in parsed if in_window(item.as_of_date, start, end))
+        points.extend(
+            filter_window(attach_fetch(parsed, result), start, end, errors, f"华泰柏瑞第 {page} 页")
+        )
         page += 1
         if page > 40:
             errors.append("华泰柏瑞分页超过 40 页，停止")
@@ -181,6 +183,7 @@ def collect_huatai(
             if row is None:
                 notes.append("首页打开了，但没有解析到 510300 的单位净值和日期")
             else:
+                attach_fetch([row], home)
                 points.append(row)
                 notes.append(f"首页静态表 {row.as_of_date} 单位净值 {row.original_value}")
     return FetchBatch(SOURCE, points, errors, notes, urls)

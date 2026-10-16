@@ -6,15 +6,14 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import sqlite3
 from dataclasses import dataclass
 from datetime import datetime
-from decimal import Decimal
 from pathlib import Path
 
 from etf_flow_observer.labels import prepare_disclosure
-from etf_flow_observer.timing import SHANGHAI
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS raw_fetches (
@@ -26,7 +25,11 @@ CREATE TABLE IF NOT EXISTS raw_fetches (
     request_body TEXT,
     http_status INTEGER,
     body_path TEXT,
+    content_sha256 TEXT,
     fetched_at TEXT NOT NULL,
+    network_fetched_at TEXT,
+    cache_accessed_at TEXT,
+    attempt_no INTEGER NOT NULL DEFAULT 1,
     from_cache INTEGER NOT NULL,
     error TEXT
 );
@@ -66,6 +69,9 @@ CREATE TABLE IF NOT EXISTS observation_versions (
     quality_status TEXT NOT NULL,
     quality_flags TEXT NOT NULL,
     raw_fetch_id INTEGER,
+    network_fetched_at TEXT,
+    cache_accessed_at TEXT,
+    observation_available_at TEXT,
     note TEXT NOT NULL DEFAULT '',
     UNIQUE (observation_id, version_no)
 );
@@ -167,22 +173,31 @@ class Store:
         from_cache: bool,
         error: str | None,
         existing_body_path: str | None = None,
+        content_sha256: str | None = None,
+        network_fetched_at: datetime | None = None,
+        cache_accessed_at: datetime | None = None,
+        attempt_no: int = 1,
     ) -> int:
         body_path = existing_body_path
-        if body is not None and body_path is None:
-            day = fetched_at.astimezone(SHANGHAI).strftime("%Y%m%d")
-            directory = self.raw_dir / source_name / day
-            directory.mkdir(parents=True, exist_ok=True)
-            path = directory / fingerprint[:24]
+        digest = content_sha256
+        if body is not None:
+            digest = hashlib.sha256(body).hexdigest()
+            path = self.raw_dir / "by-hash" / digest
+            path.parent.mkdir(parents=True, exist_ok=True)
             if not path.exists():
                 path.write_bytes(body)
             body_path = str(path)
+        network_stamp = (network_fetched_at or fetched_at).isoformat(timespec="seconds")
+        cache_stamp = (
+            cache_accessed_at.isoformat(timespec="seconds") if cache_accessed_at is not None else None
+        )
         cursor = self.conn.execute(
             """
             INSERT INTO raw_fetches (
                 source_name, fingerprint, method, url, request_body, http_status,
-                body_path, fetched_at, from_cache, error
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                body_path, content_sha256, fetched_at, network_fetched_at, cache_accessed_at,
+                attempt_no, from_cache, error
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 source_name,
@@ -192,7 +207,11 @@ class Store:
                 request_body,
                 http_status,
                 body_path,
-                fetched_at.isoformat(timespec="seconds"),
+                digest,
+                network_stamp,
+                network_stamp,
+                cache_stamp,
+                attempt_no,
                 1 if from_cache else 0,
                 error,
             ),
@@ -204,7 +223,8 @@ class Store:
         return self.conn.execute(
             """
             SELECT * FROM raw_fetches
-            WHERE fingerprint = ? AND error IS NULL AND http_status = 200 AND body_path IS NOT NULL
+            WHERE fingerprint = ? AND from_cache = 0 AND error IS NULL
+              AND http_status = 200 AND body_path IS NOT NULL
             ORDER BY id DESC LIMIT 1
             """,
             (fingerprint,),
@@ -255,8 +275,17 @@ class Store:
         lookahead_free: bool,
         raw_fetch_id: int | None,
         note: str,
+        network_fetched_at: datetime | None = None,
+        cache_accessed_at: datetime | None = None,
+        observation_available_at: datetime | None = None,
+        decided_at: datetime | None = None,
+        cause: str | None = None,
     ) -> UpsertResult:
         fetched = fetched_at.isoformat(timespec="seconds")
+        available = (observation_available_at or fetched_at).isoformat(timespec="seconds")
+        decided = (decided_at or fetched_at).isoformat(timespec="seconds")
+        network_stamp = network_fetched_at.isoformat(timespec="seconds") if network_fetched_at else None
+        cache_stamp = cache_accessed_at.isoformat(timespec="seconds") if cache_accessed_at else None
         flags = json.dumps(quality_flags, ensure_ascii=False)
         existing = self.conn.execute(
             """
@@ -278,7 +307,7 @@ class Store:
                     as_of_date,
                     series,
                     source_name,
-                    fetched,
+                    available,
                     1 if authoritative else 0,
                     1 if lookahead_free else 0,
                 ),
@@ -297,24 +326,28 @@ class Store:
                 standardized_unit=standardized_unit,
                 source_url=source_url,
                 fetched_at=fetched,
-                first_seen_at=fetched,
+                first_seen_at=available,
                 revised_at=None,
                 snapshot_phase=snapshot_phase,
                 content_hash=content_hash,
                 quality_status=quality_status,
                 quality_flags=flags,
                 raw_fetch_id=raw_fetch_id,
+                network_fetched_at=network_stamp,
+                cache_accessed_at=cache_stamp,
+                observation_available_at=available,
                 note=note,
             )
-            self._event(observation_id, "created", fetched, content_hash)
+            self._event(observation_id, "created", available, content_hash)
             self.conn.commit()
-            return UpsertResult("created", observation_id, 1, fetched, None, quality_status)
+            return UpsertResult("created", observation_id, 1, available, None, quality_status)
 
         latest = self.latest_version_row(int(existing["id"]))
         same_number = latest["content_hash"] == content_hash
         same_phase = latest["snapshot_phase"] == snapshot_phase
         same_status = latest["quality_status"] == quality_status
-        if same_number and same_phase and same_status:
+        same_flags = json.loads(latest["quality_flags"]) == quality_flags
+        if same_number and same_phase and same_status and same_flags:
             self._event(int(existing["id"]), "confirmed_same_hash", fetched, content_hash)
             self.conn.commit()
             return UpsertResult(
@@ -339,16 +372,19 @@ class Store:
             standardized_value=standardized_value,
             standardized_unit=standardized_unit,
             source_url=source_url,
-            fetched_at=fetched,
-            first_seen_at=existing["first_seen_at"],
-            revised_at=fetched,
-            snapshot_phase=snapshot_phase,
-            content_hash=content_hash,
-            quality_status=quality_status,
-            quality_flags=flags,
-            raw_fetch_id=raw_fetch_id,
-            note=note,
-        )
+                fetched_at=fetched,
+                first_seen_at=existing["first_seen_at"],
+                revised_at=decided,
+                snapshot_phase=snapshot_phase,
+                content_hash=content_hash,
+                quality_status=quality_status,
+                quality_flags=flags,
+                raw_fetch_id=raw_fetch_id,
+                network_fetched_at=network_stamp,
+                cache_accessed_at=cache_stamp,
+                observation_available_at=available,
+                note=note,
+            )
         self.conn.execute(
             """
             UPDATE observations
@@ -356,22 +392,27 @@ class Store:
             WHERE id = ?
             """,
             (
-                fetched,
+                decided,
                 1 if authoritative else 0,
                 1 if lookahead_free else 0,
                 version_no,
                 int(existing["id"]),
             ),
         )
-        action = "revised" if not same_number else "phase_revised"
-        self._event(int(existing["id"]), action, fetched, content_hash)
+        if cause == "dependent":
+            action = "dependent_revised"
+        elif not same_number:
+            action = "revised"
+        else:
+            action = "phase_revised"
+        self._event(int(existing["id"]), action, decided, content_hash)
         self.conn.commit()
         return UpsertResult(
             action,
             int(existing["id"]),
             version_no,
             existing["first_seen_at"],
-            fetched,
+            decided,
             quality_status,
         )
 
@@ -382,12 +423,14 @@ class Store:
                 observation_id, version_no, fund_code, as_of_date, series, source_name,
                 original_value, original_unit, standardized_value, standardized_unit,
                 source_url, fetched_at, first_seen_at, revised_at, snapshot_phase,
-                content_hash, quality_status, quality_flags, raw_fetch_id, note
+                content_hash, quality_status, quality_flags, raw_fetch_id,
+                network_fetched_at, cache_accessed_at, observation_available_at, note
             ) VALUES (
                 :observation_id, :version_no, :fund_code, :as_of_date, :series, :source_name,
                 :original_value, :original_unit, :standardized_value, :standardized_unit,
                 :source_url, :fetched_at, :first_seen_at, :revised_at, :snapshot_phase,
-                :content_hash, :quality_status, :quality_flags, :raw_fetch_id, :note
+                :content_hash, :quality_status, :quality_flags, :raw_fetch_id,
+                :network_fetched_at, :cache_accessed_at, :observation_available_at, :note
             )
             """,
             kwargs,
@@ -447,29 +490,6 @@ class Store:
             """,
             (fund_code, as_of_date, series, source_name),
         ).fetchone()
-
-    def previous_standardized(
-        self,
-        fund_code: str,
-        source_name: str,
-        series: str,
-        before_date: str,
-    ) -> Decimal | None:
-        row = self.conn.execute(
-            """
-            SELECT v.standardized_value
-            FROM observation_versions v
-            JOIN observations o ON o.id = v.observation_id AND o.latest_version_no = v.version_no
-            WHERE v.fund_code = ? AND v.source_name = ? AND v.series = ?
-              AND v.as_of_date < ? AND v.standardized_value IS NOT NULL
-            ORDER BY v.as_of_date DESC
-            LIMIT 1
-            """,
-            (fund_code, source_name, series, before_date),
-        ).fetchone()
-        if row is None:
-            return None
-        return Decimal(row["standardized_value"])
 
     def add_gap(
         self,
@@ -570,7 +590,9 @@ class Store:
             SELECT o.first_seen_at, o.revised_at, o.authoritative, o.lookahead_free,
                    v.original_value, v.original_unit, v.standardized_value, v.standardized_unit,
                    v.source_url, v.fetched_at, v.snapshot_phase, v.content_hash,
-                   v.quality_status, v.quality_flags, v.note, v.version_no
+                   v.quality_status, v.quality_flags, v.note, v.version_no,
+                   v.raw_fetch_id, v.network_fetched_at, v.cache_accessed_at,
+                   v.observation_available_at
             FROM observations o
             JOIN observation_versions v
               ON v.observation_id = o.id AND v.version_no = o.latest_version_no

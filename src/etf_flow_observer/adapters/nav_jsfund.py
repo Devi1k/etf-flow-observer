@@ -12,14 +12,14 @@ import re
 from datetime import date
 from urllib.parse import urlsplit, urlunsplit
 
-from etf_flow_observer.adapters.common import FetchBatch, RawPoint, in_window
+from etf_flow_observer.adapters.common import FetchBatch, RawPoint, attach_fetch, filter_window
 
 SOURCE = "jsfund_nav"
 FUND = "159919"
 ROW = re.compile(
     r"<tr>\s*<td>\s*(\d{4}-\d{2}-\d{2})\s*</td>\s*"
-    r"<td>\s*([0-9]+(?:\.[0-9]+)?)\s*</td>\s*"
-    r"<td>\s*([0-9]+(?:\.[0-9]+)?)\s*</td>\s*</tr>",
+    r"<td>\s*([0-9]+(?:\.[0-9]+)?|--)\s*</td>\s*"
+    r"<td>\s*([0-9]+(?:\.[0-9]+)?|--)?\s*</td>\s*</tr>",
     re.IGNORECASE,
 )
 
@@ -37,32 +37,49 @@ def parse_jsfund(html: str, source_url: str, *, used_fallback: bool) -> list[Raw
     points: list[RawPoint] = []
     for nav_date, unit_nav, cumulative in ROW.findall(html):
         flags = ["primary_host_unreachable_used_official_apex"] if used_fallback else []
-        points.append(
-            RawPoint(
-                fund_code=FUND,
-                as_of_date=nav_date,
-                series="unit_nav",
-                original_value=unit_nav,
-                original_unit="元",
-                source_name=SOURCE,
-                source_url=source_url,
-                note=f"份额净值。{note_flag}",
-                flags=list(flags),
+        if unit_nav in {"", "--"}:
+            points.append(
+                RawPoint(
+                    fund_code=FUND,
+                    as_of_date=nav_date,
+                    series="unit_nav",
+                    original_value="",
+                    original_unit="元",
+                    source_name=SOURCE,
+                    source_url=source_url,
+                    note="缺少份额净值，拒绝改用累计净值",
+                    conflict=True,
+                    flags=list(flags),
+                )
             )
-        )
-        points.append(
-            RawPoint(
-                fund_code=FUND,
-                as_of_date=nav_date,
-                series="cumulative_nav",
-                original_value=cumulative,
-                original_unit="元",
-                source_name=SOURCE,
-                source_url=source_url,
-                note="累计净值，不能当作份额净值",
-                flags=list(flags),
+        else:
+            points.append(
+                RawPoint(
+                    fund_code=FUND,
+                    as_of_date=nav_date,
+                    series="unit_nav",
+                    original_value=unit_nav,
+                    original_unit="元",
+                    source_name=SOURCE,
+                    source_url=source_url,
+                    note=f"份额净值。{note_flag}",
+                    flags=list(flags),
+                )
             )
-        )
+        if cumulative and cumulative != "--":
+            points.append(
+                RawPoint(
+                    fund_code=FUND,
+                    as_of_date=nav_date,
+                    series="cumulative_nav",
+                    original_value=cumulative,
+                    original_unit="元",
+                    source_name=SOURCE,
+                    source_url=source_url,
+                    note="累计净值，不能当作份额净值",
+                    flags=list(flags),
+                )
+            )
     return points
 
 
@@ -108,7 +125,7 @@ def collect_jsfund(
         errors.append("返回页面不像嘉实基金的历史净值表，拒绝入库")
         return FetchBatch(SOURCE, [], errors, notes, urls)
     parsed = parse_jsfund(result.text, result.url, used_fallback=used_fallback)
-    points = [item for item in parsed if in_window(item.as_of_date, start, end)]
+    points = filter_window(attach_fetch(parsed, result), start, end, errors, "嘉实")
     if not points:
         errors.append("嘉实页面里没有窗口内的净值行")
     return FetchBatch(SOURCE, points, errors, notes, urls)

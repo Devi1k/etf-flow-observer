@@ -10,7 +10,7 @@ import json
 import urllib.parse
 from datetime import date
 
-from etf_flow_observer.adapters.common import FetchBatch, RawPoint, in_window
+from etf_flow_observer.adapters.common import FetchBatch, RawPoint, attach_fetch, filter_window
 from etf_flow_observer.errors import ObserverError
 from etf_flow_observer.standardize import as_original_text
 
@@ -95,7 +95,7 @@ def collect_szse(client, start: date, end: date, *, use_cache: bool) -> FetchBat
         if page_no != page:
             errors.append(f"SZSE 页码错位：请求 {page}，返回 {page_no}")
             break
-        points.extend(item for item in parsed if in_window(item.as_of_date, start, end))
+        points.extend(filter_window(attach_fetch(parsed, result), start, end, errors, f"SZSE 第 {page} 页"))
         page += 1
         if page > 20:
             errors.append("SZSE 分页超过 20 页，停止")

@@ -26,8 +26,11 @@
 | original_unit | 份额为“万份”，净值为“元” |
 | standardized_value | 份额已乘 10000；净值仍是元。冲突或无法解析时为空，不是 0 |
 | source_url | 实际请求的地址。嘉实若改走 www.jsfund.cn，这里会是实际地址 |
-| fetched_at | 这一版抓取的时间 |
-| first_seen_at | 本系统第一次看见该键的时间 |
+| fetched_at | 这一版所依据的网络响应时间。缓存复用不会把它改成后来的读取时间 |
+| network_fetched_at | 正文第一次从网络到达的时间 |
+| cache_accessed_at | 若这次是缓存复用，则为读取缓存的时间，否则为空。它不延长缓存有效期 |
+| observation_available_at | 这条观察所用正文的到达时间。采集任务开始时的同一个 now 不能拿来填它 |
+| first_seen_at | 本系统第一次看见该键的时间。不是交易所发布时间 |
 | revised_at | 这一版若是修订则为修订时间，否则为空 |
 | content_hash | 基金、日期、序列、单位和标准化数字的 SHA-256 |
 | quality_status | 见下表 |
@@ -41,7 +44,7 @@
 
 | 状态 | 含义 | 能否计算可执行申赎 |
 | --- | --- | --- |
-| ok | 交易日、单位清楚、没有跳变，且阶段允许 | 还要有上一笔份额 |
+| ok | 交易日、单位清楚、没有跳变，且阶段允许 | 还要有相邻上一交易日的可用份额 |
 | provisional_evening | 当日晚间份额，只供参考 | 否 |
 | overnight_provisional | 次日 08:00 之前看到的份额 | 否 |
 | premature | 收盘前就去要当天收盘数据 | 否 |
@@ -52,7 +55,8 @@
 | duplicate_conflict | 同一页或相邻页给出不同数字 | 否，不挑选其中一个 |
 | stale | 读取时发现 ok 记录已超过配置的小时数 | 否 |
 | cross_check_conflict | 华泰柏瑞历史表和首页不一致 | 否 |
-| no_prior_share | 作为标志放在 flags 里。观察本身可以是 ok，但没有上一笔就不能算变化 | 否 |
+| no_adjacent_share | 作为标志放在 flags 里。没有相邻上一交易日的份额。不能改用更早的非空值 | 否 |
+| prior_not_valid | 相邻上一交易日的份额状态不能做差，例如异常跳变 | 否 |
 
 `no_exchange_row` 和 `fetch_failed` 记在 `data_gaps`，不产生份额为 0 的观察。
 
@@ -72,12 +76,12 @@
 
 ## 其他表
 
-- `raw_fetches`：每一次 HTTP，包括失败和缓存复用。正文在 `data/raw/`，不进 git。
+- `raw_fetches`：每一次真实往返和每一次重试各一行，缓存复用另记一行。正文按内容哈希放在 `data/raw/by-hash/`，已存在的文件不覆盖。观察版本的 `raw_fetch_id` 指向产生该正文的那一次网络抓取，不指向缓存读取。不进 git。
 - `data_gaps`：明确的缺失。
-- `quality_events`：创建、确认、修订，以及首页核对冲突。
+- `quality_events`：创建、确认、修订、依赖日重算，以及首页核对冲突。重算只追加版本。
 - `disclosure_records`：只允许 `etf_share_change`。`official_increase_holding` 会被拒绝。备注里出现“国家队”也会被拒绝。
-- `checkpoints`：某个来源和日期窗口已经完整抓过。`--force` 可以再跑。
-- `sim_ledger`：表结构在，写入函数拒绝插入。
+- `checkpoints`：`complete` 才会让下一轮跳过。有缺口但没有 HTTP 错误是 `waiting_update`，下一轮仍会再跑。有错误，或窗口盖住 2026-10-01 至 10-07 而休市表没写明其中的工作日，是 `incomplete`。
+- `sim_ledger`：表结构在，写入函数拒绝插入。影子试验没有启动。
 
 ## 原始响应里用到的字段
 

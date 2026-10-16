@@ -54,6 +54,8 @@ class FetchResult:
     from_cache: bool
     raw_id: int
     error: str | None
+    network_fetched_at: datetime
+    cache_accessed_at: datetime | None = None
 
     def json(self) -> object:
         return json.loads(self.text, parse_float=Decimal, parse_int=Decimal)
@@ -104,12 +106,12 @@ class HttpClient:
         if use_cache:
             cached = self.store.latest_success(fingerprint)
             if cached is not None:
-                fetched = datetime.fromisoformat(cached["fetched_at"])
+                fetched = datetime.fromisoformat(cached["network_fetched_at"] or cached["fetched_at"])
                 age = (now - fetched).total_seconds()
                 path = cached["body_path"]
                 if age <= self.cache_ttl_seconds and path:
                     payload = open(path, "rb").read()
-                    raw_id = self.store.save_raw(
+                    self.store.save_raw(
                         source_name=source_name,
                         fingerprint=fingerprint,
                         method=method,
@@ -117,10 +119,14 @@ class HttpClient:
                         request_body=_body_text(body),
                         http_status=200,
                         body=None,
-                        fetched_at=now,
+                        fetched_at=fetched,
                         from_cache=True,
                         error=None,
                         existing_body_path=path,
+                        content_sha256=cached["content_sha256"],
+                        network_fetched_at=fetched,
+                        cache_accessed_at=now,
+                        attempt_no=0,
                     )
                     return FetchResult(
                         url=url,
@@ -130,21 +136,13 @@ class HttpClient:
                         text=_decode(payload, Message()),
                         fetched_at=fetched,
                         from_cache=True,
-                        raw_id=raw_id,
+                        raw_id=int(cached["id"]),
                         error=None,
+                        network_fetched_at=fetched,
+                        cache_accessed_at=now,
                     )
 
-        if self.http_calls >= self.max_http_requests:
-            raise ObserverError(
-                f"这一轮 HTTP 请求已到上限 {self.max_http_requests}，停止以免连续打接口"
-            )
-
         host = urllib.parse.urlsplit(url).hostname or ""
-        wait = self.store.reserve_host(host, self.min_interval_seconds, now)
-        if wait > 0:
-            self.sleeper(wait)
-        self.store.mark_host(host, self.clock())
-
         request_headers = {
             "User-Agent": self.user_agent,
             "Accept": "*/*",
@@ -157,7 +155,18 @@ class HttpClient:
         status: int | None = None
         payload = b""
         response_headers = Message()
+        raw_id = 0
+        network_at = now
         for attempt in range(1, self.max_retries + 1):
+            if self.http_calls >= self.max_http_requests:
+                raise ObserverError(
+                    f"这一轮 HTTP 请求已到上限 {self.max_http_requests}，停止以免连续打接口"
+                )
+            delay = self._attempt_delay(host, attempt)
+            if delay > 0:
+                self.sleeper(delay)
+            network_at = self.clock()
+            self.store.mark_host(host, network_at)
             self.http_calls += 1
             try:
                 status, response_headers, payload = self._once(
@@ -167,46 +176,52 @@ class HttpClient:
                     last_error = f"HTTP {status}"
                 else:
                     last_error = ""
-                    break
             except (TimeoutError, OSError, http.client.HTTPException) as exc:
                 last_error = f"{type(exc).__name__}: {exc}"
                 status = None
                 payload = b""
-            if attempt < self.max_retries:
-                self.sleeper(min(8, 2 ** attempt))
-                if self.http_calls >= self.max_http_requests:
-                    break
+            error = _attempt_error(last_error, status, response_headers)
+            raw_id = self.store.save_raw(
+                source_name=source_name,
+                fingerprint=fingerprint,
+                method=method,
+                url=url,
+                request_body=_body_text(body),
+                http_status=status,
+                body=payload,
+                fetched_at=network_at,
+                from_cache=False,
+                error=error,
+                network_fetched_at=network_at,
+                cache_accessed_at=None,
+                attempt_no=attempt,
+            )
+            retryable = status in {429, 500, 502, 503, 504} or status is None
+            if error is None or not retryable or attempt >= self.max_retries:
+                break
 
-        error = last_error or None
-        if status is not None and status >= 400 and error is None:
-            error = f"HTTP {status}"
-        if status in {301, 302, 303, 307, 308}:
-            location = response_headers.get("Location", "")
-            error = f"重定向到 {location or '未知地址'}，不把跳转页当成数据"
-        raw_id = self.store.save_raw(
-            source_name=source_name,
-            fingerprint=fingerprint,
-            method=method,
-            url=url,
-            request_body=_body_text(body),
-            http_status=status,
-            body=payload,
-            fetched_at=self.clock(),
-            from_cache=False,
-            error=error,
-        )
         text = _decode(payload, response_headers)
+        final_error = None if status == 200 and last_error == "" else _attempt_error(last_error, status, response_headers)
         return FetchResult(
             url=url,
             method=method,
             status=status,
             body=payload,
             text=text,
-            fetched_at=self.clock(),
+            fetched_at=network_at,
             from_cache=False,
             raw_id=raw_id,
-            error=error,
+            error=final_error,
+            network_fetched_at=network_at,
+            cache_accessed_at=None,
         )
+
+    def _attempt_delay(self, host: str, attempt: int) -> float:
+        """两次真实请求至少间隔配置的最小间隔，重试不能比这个更短。"""
+        wait = self.store.reserve_host(host, self.min_interval_seconds, self.clock())
+        if attempt == 1:
+            return wait
+        return max(wait, float(self.min_interval_seconds))
 
     def _once(self, method: str, url: str, headers: dict[str, str], body: bytes | None):
         if self.transport is not None:
@@ -226,6 +241,19 @@ class HttpClient:
             return response.status, response.headers, payload
         finally:
             connection.close()
+
+
+def _attempt_error(last_error: str, status: int | None, headers: Message) -> str | None:
+    if status in {301, 302, 303, 307, 308}:
+        location = headers.get("Location", "") if headers else ""
+        return f"重定向到 {location or '未知地址'}，不把跳转页当成数据"
+    if last_error:
+        return last_error
+    if status is not None and status >= 400:
+        return f"HTTP {status}"
+    if status is None:
+        return last_error or "没有发出请求"
+    return None
 
 
 def _decode(payload: bytes, headers: Message) -> str:

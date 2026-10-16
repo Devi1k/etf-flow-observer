@@ -10,16 +10,15 @@ import re
 import urllib.parse
 from datetime import date
 
-from etf_flow_observer.adapters.common import FetchBatch, RawPoint, in_window
-from etf_flow_observer.errors import ObserverError
+from etf_flow_observer.adapters.common import FetchBatch, RawPoint, attach_fetch, filter_window
 
 SOURCE = "chinaamc_nav"
 API = "https://www.chinaamc.com/product/fundLishijingzhi.do?fundcode=510330"
 FUND = "510330"
 ROW = re.compile(
     r"<tr>\s*<td>\s*(\d{4}-\d{2}-\d{2})\s*</td>\s*"
-    r"<td>\s*(?:<span>)?\s*([0-9]+(?:\.[0-9]+)?)\s*(?:</span>)?\s*</td>\s*"
-    r"<td>\s*(?:<span>)?\s*([0-9]+(?:\.[0-9]+)?)\s*(?:</span>)?\s*</td>",
+    r"<td>\s*(?:<span>)?\s*([0-9]+(?:\.[0-9]+)?|--)\s*(?:</span>)?\s*</td>\s*"
+    r"<td>\s*(?:<span>)?\s*([0-9]+(?:\.[0-9]+)?|--)?\s*(?:</span>)?\s*</td>",
     re.IGNORECASE,
 )
 TOTAL_PAGE = re.compile(r"totalPage\s*=\s*'(\d+)'")
@@ -45,30 +44,46 @@ def parse_chinaamc(html: str, source_url: str) -> tuple[list[RawPoint], int | No
     current_page = int(currents[0]) if currents else None
     points: list[RawPoint] = []
     for nav_date, unit_nav, cumulative in ROW.findall(html):
-        points.append(
-            RawPoint(
-                fund_code=FUND,
-                as_of_date=nav_date,
-                series="unit_nav",
-                original_value=unit_nav,
-                original_unit="元",
-                source_name=SOURCE,
-                source_url=source_url,
-                note="历史净值表第 2 列，单位净值",
+        if unit_nav in {"", "--"}:
+            points.append(
+                RawPoint(
+                    fund_code=FUND,
+                    as_of_date=nav_date,
+                    series="unit_nav",
+                    original_value="",
+                    original_unit="元",
+                    source_name=SOURCE,
+                    source_url=source_url,
+                    conflict=True,
+                    note="缺少单位净值，拒绝改用累计净值",
+                )
             )
-        )
-        points.append(
-            RawPoint(
-                fund_code=FUND,
-                as_of_date=nav_date,
-                series="cumulative_nav",
-                original_value=cumulative,
-                original_unit="元",
-                source_name=SOURCE,
-                source_url=source_url,
-                note="历史净值表第 3 列，累计净值，不能当作单位净值",
+        else:
+            points.append(
+                RawPoint(
+                    fund_code=FUND,
+                    as_of_date=nav_date,
+                    series="unit_nav",
+                    original_value=unit_nav,
+                    original_unit="元",
+                    source_name=SOURCE,
+                    source_url=source_url,
+                    note="历史净值表第 2 列，单位净值",
+                )
             )
-        )
+        if cumulative and cumulative != "--":
+            points.append(
+                RawPoint(
+                    fund_code=FUND,
+                    as_of_date=nav_date,
+                    series="cumulative_nav",
+                    original_value=cumulative,
+                    original_unit="元",
+                    source_name=SOURCE,
+                    source_url=source_url,
+                    note="历史净值表第 3 列，累计净值，不能当作单位净值",
+                )
+            )
     return points, current_page, total_page
 
 
@@ -106,8 +121,9 @@ def collect_chinaamc(client, start: date, end: date, *, use_cache: bool) -> Fetc
             )
             break
         total_page = total_page_value
-        points.extend(item for item in parsed if in_window(item.as_of_date, start, end))
+        points.extend(filter_window(attach_fetch(parsed, result), start, end, errors, f"华夏第 {page} 页"))
         page += 1
         if page > 40:
-            raise ObserverError("华夏净值分页超过 40 页，停止")
+            errors.append("华夏净值分页超过 40 页，停止")
+            break
     return FetchBatch(SOURCE, points, errors, [], urls)

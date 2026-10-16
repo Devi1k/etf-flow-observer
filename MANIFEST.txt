@@ -1,10 +1,13 @@
-commit_sha=93315cd565ffd09a1ec96311edd131118371345a
-commit_short=93315cd
+commit_sha=45ced0ca667bd507d95ebad4af03284a1a7602fa
+commit_short=45ced0c
 branch=main
-tracked_file_count=43
-packaged_file_count=44
+github_base=2621ca0ef0f9e089ff4d89557d9d3fcddd191157
+github_url=https://github.com/Devi1k/etf-flow-observer
+tracked_file_count=45
+packaged_file_count=46
 excluded=data/, .venv, .git, secrets, __pycache__
-note=The 43 tracked files match HEAD. MANIFEST.txt is only in this package.
+suggested_commit_message=Apply A-K review fixes for raw identity, clock authority, and adjacent flows.
+note=The 45 tracked files match this commit. MANIFEST.txt is only in this package. Do not treat evening-to-morning live revision, 120-day backfill, knowledge-cutoff replay, or frozen simulation parameters as done.
 
 tracked_files:
 .gitignore
@@ -14,6 +17,7 @@ config/simulation.example.toml
 docs/data-dictionary.md
 docs/experiment-protocol.md
 docs/live-smoke.md
+docs/review-response-AK.md
 docs/scheduler.md
 pyproject.toml
 src/etf_flow_observer/__init__.py
@@ -47,6 +51,7 @@ tests/test_labels_and_config.py
 tests/test_missing_stale.py
 tests/test_nav_fields.py
 tests/test_pagination.py
+tests/test_review_ak.py
 tests/test_revise.py
 tests/test_signal_time.py
 tests/test_standardize.py

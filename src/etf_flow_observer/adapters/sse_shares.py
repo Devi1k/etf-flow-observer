@@ -7,7 +7,7 @@ import urllib.parse
 from datetime import date
 from decimal import Decimal
 
-from etf_flow_observer.adapters.common import FetchBatch, RawPoint
+from etf_flow_observer.adapters.common import FetchBatch, RawPoint, attach_fetch, filter_window
 from etf_flow_observer.errors import ObserverError
 from etf_flow_observer.standardize import as_original_text
 from etf_flow_observer.universe import SSE_SHARE_CODES
@@ -86,14 +86,21 @@ def collect_sse(client, days: list[date], *, page_size: int, use_cache: bool) ->
             if not isinstance(payload, dict):
                 errors.append(f"SSE {day.isoformat()} 返回的不是对象")
                 break
-            parsed, page_no, page_count = parse_sse(payload, result.url)
+            try:
+                parsed, page_no, page_count = parse_sse(payload, result.url)
+            except (ObserverError, ValueError, TypeError) as exc:
+                errors.append(f"SSE {day.isoformat()} 第 {page} 页页码无效: {exc}")
+                break
             if page_no != page:
                 errors.append(f"SSE 页码错位：请求 {page}，返回 {page_no}")
                 break
-            points.extend(parsed)
+            points.extend(
+                filter_window(attach_fetch(parsed, result), day, day, errors, f"SSE {day.isoformat()}")
+            )
             page += 1
             if page > 10:
-                raise ObserverError("SSE 分页超过 10 页，停止")
+                errors.append("SSE 分页超过 10 页，停止")
+                break
         found = {item.fund_code for item in points if item.as_of_date == day.isoformat()}
         missing = [code for code in SSE_SHARE_CODES if code not in found]
         if missing:

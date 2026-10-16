@@ -59,7 +59,7 @@ def assess_share_jump(
     """相对上一笔已保存的份额看跳变。没有上一笔时不计算申赎。"""
     flags: list[str] = []
     if previous is None:
-        return "ok", ["no_prior_share"]
+        return "ok", ["no_adjacent_share"]
     if previous == 0:
         return "suspect_split_or_merge", ["prev_share_zero"]
     change = abs(current - previous) / abs(previous)
@@ -113,10 +113,19 @@ def blocks_executable(status: str) -> bool:
     return status != "ok"
 
 
+USABLE_PRIOR_STATUS = {"ok", "exploratory_backfill"}
+
+
 def blocks_flow(status: str, flags: list[str]) -> bool:
     if status != "ok":
         return True
-    return "no_prior_share" in flags
+    blocked = {"no_prior_share", "no_adjacent_share", "prior_not_valid"}
+    return any(flag in blocked for flag in flags)
+
+
+def prior_blocks_delta(status: str | None) -> bool:
+    """相邻交易日不是可用基数时，不能拿更早的非空值来补。"""
+    return status not in USABLE_PRIOR_STATUS
 
 
 def nav_cross_check(primary: Decimal, other: Decimal, tolerance: Decimal = Decimal("0.00005")) -> str:
