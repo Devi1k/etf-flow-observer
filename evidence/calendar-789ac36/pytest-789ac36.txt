@@ -1,0 +1,82 @@
+SHA: 789ac366de8a8ffe8a64a1c73dfa6572fe3ffc25
+time: 2026-10-16T20:55:20+08:00
+Python 3.13.5
+............................................................             [100%]
+==================================== PASSES ====================================
+______________________ test_sim_check_command_is_blocked _______________________
+----------------------------- Captured stdout call -----------------------------
+影子试验没有启动。下面这些门还关着：
+- version_id 还没冻结
+- 交易标的（instrument）还没决定，不能替研究者选一个好看的数
+- 入场时点（entry_timestamp）还没决定，不能替研究者选一个好看的数
+- 下单规模（order_size）还没决定，不能替研究者选一个好看的数
+- 滑点（slippage）还没决定，不能替研究者选一个好看的数
+- 佣金（commission）还没决定，不能替研究者选一个好看的数
+- 空仓资金收益（cash_idle_return）还没决定，不能替研究者选一个好看的数
+- 持有满 5 个交易日怎么数到退出（exit_day_counting）还没决定，不能替研究者选一个好看的数
+- 价格来源（price_source）还没决定，不能替研究者选一个好看的数
+- 随机对照的随机数规则（random_seed）还没决定，不能替研究者选一个好看的数
+- 调度器没有安装，也没有在本机启动过影子试验
+账本写入会被拒绝。调度示例见 docs/scheduler.md，本机没有安装。
+=========================== short test summary info ============================
+PASSED tests/test_abnormal_jump.py::test_large_but_not_split_sized_jump_blocks_flow
+PASSED tests/test_abnormal_jump.py::test_research_estimate_is_not_described_as_an_executable_signal
+PASSED tests/test_abnormal_jump.py::test_doubling_is_treated_as_a_possible_split_or_merge
+PASSED tests/test_acceptance_remaining.py::test_old_schema_sqlite_migrates_without_deleting
+PASSED tests/test_acceptance_remaining.py::test_efunds_duplicate_pages_do_not_count_as_complete
+PASSED tests/test_acceptance_remaining.py::test_efunds_total_shrinking_mid_pagination_is_incomplete
+PASSED tests/test_acceptance_remaining.py::test_null_rows_do_not_crash_collect
+PASSED tests/test_acceptance_remaining.py::test_html_keeps_unit_when_cumulative_is_na_and_blank_unit_is_missing
+PASSED tests/test_holidays.py::test_weekend_and_configured_closure_are_not_trading_days
+PASSED tests/test_holidays.py::test_share_row_on_a_holiday_is_kept_but_not_turned_into_flow
+PASSED tests/test_holidays.py::test_configured_closure_blocks_a_weekday
+PASSED tests/test_holidays.py::test_example_config_carries_official_2026_closures
+PASSED tests/test_idempotent.py::test_same_observation_is_not_stored_twice
+PASSED tests/test_idempotent.py::test_repeat_sse_fetch_does_not_add_a_version
+PASSED tests/test_labels_and_config.py::test_example_config_keeps_the_fixed_universe
+PASSED tests/test_labels_and_config.py::test_config_cannot_swap_the_universe
+PASSED tests/test_labels_and_config.py::test_share_change_is_not_an_official_increase_or_state_team
+PASSED tests/test_labels_and_config.py::test_sim_check_command_is_blocked
+PASSED tests/test_missing_stale.py::test_missing_fund_is_not_zero_and_blocks_the_four_fund_total
+PASSED tests/test_missing_stale.py::test_stale_ok_row_cannot_be_treated_as_fresh
+PASSED tests/test_missing_stale.py::test_partial_universe_cannot_be_summed_as_zero
+PASSED tests/test_nav_fields.py::test_unit_nav_is_not_cumulative_nav
+PASSED tests/test_nav_fields.py::test_homepage_cross_check_uses_qualified_columns
+PASSED tests/test_nav_fields.py::test_missing_unit_nav_does_not_fall_back_to_cumulative
+PASSED tests/test_pagination.py::test_later_chinaamc_page_omits_is_query
+PASSED tests/test_pagination.py::test_chinaamc_client_requests_page_two_without_resetting
+PASSED tests/test_pagination.py::test_same_page_duplicate_collapses_and_conflict_keeps_no_number
+PASSED tests/test_pagination.py::test_efunds_walks_zero_based_pages
+PASSED tests/test_pagination.py::test_szse_duplicate_rows_do_not_pick_one
+PASSED tests/test_review_ak.py::test_raw_body_is_immutable_and_versions_link_the_network_fetch
+PASSED tests/test_review_ak.py::test_cache_hit_does_not_rewrite_body_or_extend_ttl
+PASSED tests/test_review_ak.py::test_http_client_records_response_arrival_not_request_start
+PASSED tests/test_review_ak.py::test_cache_hit_across_0800_keeps_overnight_not_morning
+PASSED tests/test_review_ak.py::test_cache_hit_e2e_http_adapter_ingest_keeps_overnight_across_0800
+PASSED tests/test_review_ak.py::test_request_crossing_0935_cannot_schedule_entry_at_0935
+PASSED tests/test_review_ak.py::test_legacy_cache_row_without_network_fetched_at_forces_refresh
+PASSED tests/test_review_ak.py::test_requested_morning_cannot_upgrade_clock_phase
+PASSED tests/test_review_ak.py::test_missing_adjacent_day_does_not_use_an_older_share
+PASSED tests/test_review_ak.py::test_abnormal_prior_blocks_delta_without_raising_the_threshold
+PASSED tests/test_review_ak.py::test_revising_an_earlier_day_appends_a_new_version_and_keeps_the_old_one
+PASSED tests/test_review_ak.py::test_empty_closures_fail_national_day_history_acceptance
+PASSED tests/test_review_ak.py::test_efunds_pages_follow_response_totals_for_sixty_dates
+PASSED tests/test_review_ak.py::test_efunds_empty_page_before_total_is_incomplete
+PASSED tests/test_review_ak.py::test_gaps_without_http_errors_do_not_freeze_the_checkpoint
+PASSED tests/test_review_ak.py::test_bad_numbers_and_pages_do_not_crash_or_count_as_complete
+PASSED tests/test_review_ak.py::test_retries_keep_evidence_and_wait_at_least_the_min_interval
+PASSED tests/test_review_ak.py::test_html_keeps_unit_nav_when_cumulative_is_missing
+PASSED tests/test_review_ak.py::test_denominator_is_the_trading_day_before_the_five_day_window
+PASSED tests/test_review_ak.py::test_percentile_window_stays_at_the_most_recent_120
+PASSED tests/test_revise.py::test_evening_snapshot_is_revised_next_morning
+PASSED tests/test_revise.py::test_monday_fetch_of_friday_is_backfill_not_a_captured_morning
+PASSED tests/test_revise.py::test_same_morning_number_after_evening_keeps_first_seen
+PASSED tests/test_signal_time.py::test_signal_time_cannot_precede_data_or_use_the_same_close
+PASSED tests/test_signal_time.py::test_evening_or_incomplete_data_is_not_scheduled
+PASSED tests/test_signal_time.py::test_ready_authoritative_data_schedules_the_next_session_after_it_arrived
+PASSED tests/test_signal_time.py::test_121_raw_rows_do_not_make_the_quantile_window_ready
+PASSED tests/test_signal_time.py::test_example_simulation_cannot_book
+PASSED tests/test_standardize.py::test_wan_fen_becomes_fen
+PASSED tests/test_standardize.py::test_wan_fen_with_thousands_separator
+PASSED tests/test_standardize.py::test_already_in_fen_is_unchanged
+60 passed in 0.33s
