@@ -106,8 +106,10 @@ class HttpClient:
         now = self.clock()
         if use_cache:
             cached = self.store.latest_success(fingerprint)
-            if cached is not None:
-                fetched = datetime.fromisoformat(cached["network_fetched_at"] or cached["fetched_at"])
+            # 旧库行可能只有 fetched_at、network_fetched_at 为 NULL。
+            # fetched_at 不能当可靠到达时间做 TTL / 阶段 / 可得时间；也不回填旧戳。
+            if cached is not None and cached["network_fetched_at"]:
+                fetched = datetime.fromisoformat(cached["network_fetched_at"])
                 age = (now - fetched).total_seconds()
                 path = cached["body_path"]
                 if age <= self.cache_ttl_seconds and path:

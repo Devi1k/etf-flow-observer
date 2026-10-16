@@ -3,14 +3,14 @@
 from __future__ import annotations
 
 import json
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta, time
 from decimal import Decimal
 from email.message import Message
 from pathlib import Path
 
 import pytest
 
-from etf_flow_observer.adapters.common import FetchBatch, RawPoint
+from etf_flow_observer.adapters.common import FetchBatch, RawPoint, attach_fetch
 from etf_flow_observer.adapters.nav_chinaamc import parse_chinaamc
 from etf_flow_observer.adapters.nav_efunds import collect_efunds
 from etf_flow_observer.adapters.nav_jsfund import parse_jsfund
@@ -26,7 +26,7 @@ from etf_flow_observer.signals import (
 )
 from etf_flow_observer.standardize import parse_decimal, to_nav_yuan, to_shares
 from etf_flow_observer.errors import ObserverError
-from etf_flow_observer.timing import NATIONAL_DAY_2026_WEEKDAYS, applied_phase, national_day_history_block
+from etf_flow_observer.timing import NATIONAL_DAY_2026_WEEKDAYS, applied_phase, assert_entry_after_data, national_day_history_block
 from tests.conftest import ingest, shanghai
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -168,6 +168,146 @@ def test_cache_hit_across_0800_keeps_overnight_not_morning(store):
     assert row["authoritative"] == 0
     assert row["quality_status"] == "overnight_provisional"
     assert row["observation_available_at"].startswith("2026-10-16T07:50")
+
+
+def test_cache_hit_e2e_http_adapter_ingest_keeps_overnight_across_0800(store):
+    """真正走 HttpClient 缓存 → collect_sse/attach_fetch → ingest：跨 08:00 仍 overnight。"""
+    day = date(2026, 10, 15)
+    payload = {
+        "pageHelp": {"pageNo": 1, "pageCount": 1, "total": 3},
+        "result": [
+            {"STAT_DATE": "2026-10-15", "SEC_CODE": "510330", "SEC_NAME": "华夏", "TOT_VOL": "10"},
+            {"STAT_DATE": "2026-10-15", "SEC_CODE": "510300", "SEC_NAME": "华泰", "TOT_VOL": "11"},
+            {"STAT_DATE": "2026-10-15", "SEC_CODE": "510310", "SEC_NAME": "易方达", "TOT_VOL": "12"},
+        ],
+    }
+    body = json.dumps(payload).encode()
+    clock = {"now": shanghai(2026, 10, 16, 7, 50)}
+    calls = {"n": 0}
+
+    def transport(method, url, headers, request_body):
+        calls["n"] += 1
+        return 200, Message(), body
+
+    client = _client(store, transport, ttl=3600, clock=lambda: clock["now"])
+    first = collect_sse(client, [day], page_size=1000, use_cache=True)
+    assert calls["n"] == 1
+    assert not first.errors
+    assert first.points
+    assert all(p.network_fetched_at == shanghai(2026, 10, 16, 7, 50) for p in first.points)
+    assert all(p.observation_available_at == shanghai(2026, 10, 16, 7, 50) for p in first.points)
+
+    clock["now"] = shanghai(2026, 10, 16, 8, 1)
+    cached = collect_sse(client, [day], page_size=1000, use_cache=True)
+    assert calls["n"] == 1
+    assert not cached.errors
+    assert cached.points
+    for point in cached.points:
+        assert point.network_fetched_at == shanghai(2026, 10, 16, 7, 50)
+        assert point.observation_available_at == shanghai(2026, 10, 16, 7, 50)
+        assert point.cache_accessed_at == shanghai(2026, 10, 16, 8, 1)
+        assert point.raw_fetch_id is not None
+
+    batch_at = shanghai(2026, 10, 16, 8, 1)
+    result = ingest(store, cached.points, batch_at, phase="morning")
+    assert result["actions"]
+    assert all(action == "created" for action in result["actions"])
+    row = store.latest_join("510330", "2026-10-15", "shares", "sse_shares")
+    assert row["snapshot_phase"] == "overnight"
+    assert row["authoritative"] == 0
+    assert row["quality_status"] == "overnight_provisional"
+    assert row["observation_available_at"].startswith("2026-10-16T07:50")
+    assert row["cache_accessed_at"].startswith("2026-10-16T08:01")
+
+
+def test_request_crossing_0935_cannot_schedule_entry_at_0935(store):
+    """09:34:59 发请求、09:35:10 响应到达：可得时间是到达时刻；09:35:00 入场被拒。"""
+    from zoneinfo import ZoneInfo
+
+    sh = ZoneInfo("Asia/Shanghai")
+    start = datetime(2026, 10, 16, 9, 34, 59, tzinfo=sh)
+    arrive = datetime(2026, 10, 16, 9, 35, 10, tzinfo=sh)
+    clock = {"now": start}
+
+    def transport(method, url, headers, body):
+        clock["now"] = arrive
+        return 200, Message(), b'{"ok":true}'
+
+    client = _client(store, transport, ttl=0, clock=lambda: clock["now"])
+    result = client.send(
+        "GET",
+        "https://query.sse.com.cn/commonQuery.do?t=entry-gate",
+        source_name="sse_shares",
+        use_cache=False,
+    )
+    assert result.request_started_at == start
+    assert result.network_fetched_at == arrive
+    assert result.network_fetched_at != result.request_started_at
+
+    points = attach_fetch([_share("2026-10-15", "10")], result)
+    assert points[0].network_fetched_at == arrive
+    assert points[0].observation_available_at == arrive
+
+    as_of = date(2026, 10, 15)
+    executable = datetime(2026, 10, 16, 9, 35, 0, tzinfo=sh)
+    # 若误用发请求时刻，09:35:00 会错误地晚于 09:34:59 而通过
+    assert executable > start
+    with pytest.raises(ObserverError, match="早于或等于"):
+        assert_entry_after_data(executable, result.network_fetched_at, as_of)
+    with pytest.raises(ObserverError, match="早于或等于"):
+        assert_entry_after_data(executable, points[0].observation_available_at, as_of)
+
+
+def test_legacy_cache_row_without_network_fetched_at_forces_refresh(store):
+    """旧库 network_fetched_at=NULL：即使 fetched_at 仍在 TTL 内也不得当缓存命中，必须重新请求；不回填旧戳。"""
+    import hashlib
+
+    url = "https://example.test/legacy-null-arrival"
+    method = "GET"
+    fingerprint = hashlib.sha256(b"\n".join([method.encode(), url.encode(), b""])).hexdigest()
+    body = b"legacy-body"
+    digest = hashlib.sha256(body).hexdigest()
+    path = store.raw_dir / "by-hash" / digest
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(body)
+    recent = shanghai(2026, 10, 16, 9, 0).isoformat(timespec="seconds")
+    cursor = store.conn.execute(
+        """
+        INSERT INTO raw_fetches (
+            source_name, fingerprint, method, url, request_body, http_status,
+            body_path, content_sha256, fetched_at, network_fetched_at, cache_accessed_at,
+            request_started_at, attempt_no, from_cache, error
+        ) VALUES (?, ?, ?, ?, NULL, 200, ?, ?, ?, NULL, NULL, NULL, 1, 0, NULL)
+        """,
+        ("sse_shares", fingerprint, method, url, str(path), digest, recent),
+    )
+    legacy_id = int(cursor.lastrowid)
+    store.conn.commit()
+    legacy = store.conn.execute(
+        "SELECT network_fetched_at, fetched_at FROM raw_fetches WHERE id = ?",
+        (legacy_id,),
+    ).fetchone()
+    assert legacy["network_fetched_at"] is None
+    assert legacy["fetched_at"] == recent
+
+    calls = {"n": 0}
+
+    def transport(method, url, headers, request_body):
+        calls["n"] += 1
+        return 200, Message(), b"fresh-body"
+
+    client = _client(store, transport, ttl=3600, clock=lambda: shanghai(2026, 10, 16, 9, 5))
+    result = client.send("GET", url, source_name="sse_shares", use_cache=True)
+    assert calls["n"] == 1
+    assert result.from_cache is False
+    assert result.body == b"fresh-body"
+    assert result.network_fetched_at == shanghai(2026, 10, 16, 9, 5)
+    still = store.conn.execute(
+        "SELECT network_fetched_at, fetched_at FROM raw_fetches WHERE id = ?",
+        (legacy_id,),
+    ).fetchone()
+    assert still["network_fetched_at"] is None
+    assert still["fetched_at"] == recent
 
 
 def test_requested_morning_cannot_upgrade_clock_phase(store):

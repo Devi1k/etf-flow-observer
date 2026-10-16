@@ -20,13 +20,15 @@
 
 补充（c340e2c 之后）：`http_client` 在 `_once` **之前**记 `request_started_at`，在 `_once` **返回之后**再取 `network_fetched_at`。transport 里推进时钟的测试要求这两点不同；不能把发请求时刻当成响应完整到达。
 
+补充（跟进）：真实 E2E 覆盖「缓存命中 → attach_fetch / 适配器 → ingest」跨 08:00；以及「09:34:59 发请求、09:35:10 到达」联合断言——`network_fetched_at` / `observation_available_at` 取到达时刻，`assert_entry_after_data(09:35:00, …)` 拒绝排程。旧库 `raw_fetches.network_fetched_at` 为 NULL 时不把 `fetched_at` 当可靠到达时间：即使按 `fetched_at` 仍在 TTL 内也强制重新请求，不回填历史戳。
+
 ## B. 接受
 
 `--session` 和 `--phase` 只表示意图。阶段由数据日、当天日历和钟点决定，请求不能把阶段抬成更权威。
 
 配置里的 08:00 只是分界：07:59 仍是 `overnight` 且不权威；08:00 按配置可以标 `morning`。这不是交易所已经发布权威份额的保证。未来日期、周末或休市隔开的日期，即使用 `--phase morning` 也仍是 `future_invalid` 或 `backfill`。
 
-补充：判阶段用「正文可得时间」（`observation_available_at` / `network_fetched_at`），不用批次 `now`。跨 08:00 的缓存命中：07:50 的原文在 08:01 入库仍是 `overnight`，不能误升 `morning` / 权威。
+补充：判阶段用「正文可得时间」（`observation_available_at` / `network_fetched_at`），不用批次 `now`。跨 08:00 的缓存命中：07:50 的原文在 08:01 入库仍是 `overnight`，不能误升 `morning` / 权威。 另有经 HttpClient 缓存 + `collect_sse`/`attach_fetch` + `ingest_points` 的端到端反例。
 
 ## C. 接受
 
