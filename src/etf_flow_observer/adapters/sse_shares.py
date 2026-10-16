@@ -5,7 +5,6 @@ from __future__ import annotations
 import json
 import urllib.parse
 from datetime import date
-from decimal import Decimal
 
 from etf_flow_observer.adapters.common import FetchBatch, RawPoint, attach_fetch, filter_window
 from etf_flow_observer.errors import ObserverError
@@ -31,21 +30,43 @@ def build_url(day: date, page: int, page_size: int) -> str:
     return f"{API}?{query}"
 
 
-def parse_sse(payload: dict, source_url: str) -> tuple[list[RawPoint], int, int]:
-    page_help = payload.get("pageHelp") or {}
-    page_no = int(page_help.get("pageNo") or 1)
-    page_count = int(page_help.get("pageCount") or 1)
+def parse_sse(payload: object, source_url: str) -> tuple[list[RawPoint], int, int, list[str]]:
+    if not isinstance(payload, dict):
+        raise ObserverError("上交所返回的不是对象")
+    page_help = payload.get("pageHelp")
+    if page_help is None:
+        page_help = {}
+    if not isinstance(page_help, dict):
+        raise ObserverError("上交所 pageHelp 不是对象")
+    try:
+        page_no = int(page_help.get("pageNo") if page_help.get("pageNo") is not None else 1)
+        page_count = int(page_help.get("pageCount") if page_help.get("pageCount") is not None else 1)
+    except (TypeError, ValueError) as exc:
+        raise ObserverError(f"上交所页码无效: {exc}") from exc
+    rows = payload.get("result")
+    if rows is None:
+        rows = []
+    if not isinstance(rows, list):
+        raise ObserverError("上交所 result 不是列表")
     points: list[RawPoint] = []
-    for row in payload.get("result") or []:
+    row_errors: list[str] = []
+    for index, row in enumerate(rows):
+        if not isinstance(row, dict):
+            row_errors.append(f"上交所第 {page_no} 页第 {index} 行不是对象: {type(row).__name__}")
+            continue
         code = str(row.get("SEC_CODE") or "").strip()
         if code not in SSE_SHARE_CODES:
             continue
         if "TOT_VOL" not in row or row.get("TOT_VOL") in (None, ""):
             continue
+        as_of = str(row.get("STAT_DATE") or "").strip()
+        if not as_of:
+            row_errors.append(f"上交所第 {page_no} 页 {code} 缺少 STAT_DATE")
+            continue
         points.append(
             RawPoint(
                 fund_code=code,
-                as_of_date=str(row.get("STAT_DATE") or "").strip(),
+                as_of_date=as_of,
                 series="shares",
                 original_value=as_original_text(row.get("TOT_VOL")),
                 original_unit="万份",
@@ -54,7 +75,7 @@ def parse_sse(payload: dict, source_url: str) -> tuple[list[RawPoint], int, int]
                 note=f"SEC_NAME={row.get('SEC_NAME') or ''}",
             )
         )
-    return points, page_no, page_count
+    return points, page_no, page_count, row_errors
 
 
 def collect_sse(client, days: list[date], *, page_size: int, use_cache: bool) -> FetchBatch:
@@ -83,14 +104,12 @@ def collect_sse(client, days: list[date], *, page_size: int, use_cache: bool) ->
             except json.JSONDecodeError as exc:
                 errors.append(f"SSE {day.isoformat()} 不是 JSON: {exc}")
                 break
-            if not isinstance(payload, dict):
-                errors.append(f"SSE {day.isoformat()} 返回的不是对象")
-                break
             try:
-                parsed, page_no, page_count = parse_sse(payload, result.url)
+                parsed, page_no, page_count, row_errors = parse_sse(payload, result.url)
             except (ObserverError, ValueError, TypeError) as exc:
                 errors.append(f"SSE {day.isoformat()} 第 {page} 页页码无效: {exc}")
                 break
+            errors.extend(row_errors)
             if page_no != page:
                 errors.append(f"SSE 页码错位：请求 {page}，返回 {page_no}")
                 break

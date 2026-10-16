@@ -30,20 +30,39 @@ def build_body(start: date, end: date, page_index: int, page_size: int) -> bytes
     return json.dumps(payload, ensure_ascii=False).encode("utf-8")
 
 
-def parse_efunds(payload: object, source_url: str) -> tuple[list[RawPoint], int, int, int, int]:
+def parse_efunds(payload: object, source_url: str) -> tuple[list[RawPoint], int, int, int, int, list[str]]:
+    """Parse one page. Returns points, page_index, total, page_size, physical_row_count, row_errors."""
+    row_errors: list[str] = []
     if not isinstance(payload, dict):
         raise ObserverError("易方达返回的不是对象")
     if payload.get("status") not in (1, "1"):
         raise ObserverError(f"易方达状态异常: {payload.get('message')}")
-    block = payload.get("data") or {}
-    rows = block.get("data") or []
-    page_index = int(block.get("pageIndex") or 0)
-    total = int(block.get("total") or 0)
-    page_size = int(block.get("pageSize") or 0)
+    block = payload.get("data")
+    if block is None:
+        block = {}
+    if not isinstance(block, dict):
+        raise ObserverError("易方达 data 不是对象")
+    rows = block.get("data")
+    if rows is None:
+        rows = []
+    if not isinstance(rows, list):
+        raise ObserverError("易方达 data.data 不是列表")
+    try:
+        page_index = int(block.get("pageIndex") if block.get("pageIndex") is not None else 0)
+        total = int(block.get("total") if block.get("total") is not None else 0)
+        page_size = int(block.get("pageSize") if block.get("pageSize") is not None else 0)
+    except (TypeError, ValueError) as exc:
+        raise ObserverError(f"易方达分页字段无效: {exc}") from exc
     points: list[RawPoint] = []
-    for row in rows:
+    physical = 0
+    for index, row in enumerate(rows):
+        if not isinstance(row, dict):
+            row_errors.append(f"易方达第 {page_index} 页第 {index} 行不是对象: {type(row).__name__}")
+            continue
+        physical += 1
         nav_date = str(row.get("navDate") or "").strip()
         if not nav_date:
+            row_errors.append(f"易方达第 {page_index} 页第 {index} 行缺少 navDate")
             continue
         net_value = row.get("netValue")
         total_net = row.get("totalNetValue")
@@ -87,20 +106,22 @@ def parse_efunds(payload: object, source_url: str) -> tuple[list[RawPoint], int,
                     note="字段 totalNetValue，累计净值，不能当作单位净值",
                 )
             )
-    return points, page_index, total, page_size, len(rows)
+    return points, page_index, total, page_size, physical, row_errors
 
 
 def collect_efunds(client, start: date, end: date, *, page_size: int, use_cache: bool) -> FetchBatch:
-    """翻页只看响应里的 pageIndex、pageSize、total 和本页日期行数。
+    """翻页按唯一日期数与响应 metadata 判定完整性。
 
-    请求里的 page_size 不参与停止条件。日期行数不是单位净值加累计净值的点数。
+    物理行数不能替代唯一日期。重复页、total 中途缩小等异常一律记不完整，
+    绝不当成完成。
     """
     points: list[RawPoint] = []
     errors: list[str] = []
     urls: list[str] = []
     page_index = 0
     total: int | None = None
-    date_rows = 0
+    seen_dates: set[str] = set()
+    physical_rows = 0
     while True:
         body = build_body(start, end, page_index, page_size)
         urls.append(f"{API}#pageIndex={page_index}")
@@ -121,22 +142,52 @@ def collect_efunds(client, start: date, end: date, *, page_size: int, use_cache:
             errors.append(f"易方达第 {page_index} 页失败: {result.error or result.status}")
             break
         try:
-            parsed, got_index, total, got_size, row_count = parse_efunds(result.json(), result.url)
+            parsed, got_index, page_total, got_size, row_count, row_errors = parse_efunds(
+                result.json(), result.url
+            )
         except (json.JSONDecodeError, ObserverError, ValueError, TypeError) as exc:
             errors.append(f"易方达第 {page_index} 页无法解析: {exc}")
             break
+        errors.extend(row_errors)
         if got_index != page_index:
             errors.append(f"易方达页码错位：请求 {page_index}，返回 {got_index}")
             break
-        if row_count == 0 and (total is None or date_rows < total):
+        if total is None:
+            total = page_total
+        elif page_total != total:
             errors.append(
-                f"易方达第 {page_index} 页没有日期行，累计 {date_rows} 行，响应 total 为 {total}，分页不完整"
+                f"易方达分页 metadata 不一致：先前 total={total}，第 {page_index} 页 total={page_total}"
+            )
+            points.extend(
+                filter_window(attach_fetch(parsed, result), start, end, errors, f"易方达第 {page_index} 页")
             )
             break
-        if got_size and row_count < got_size and total is not None and date_rows + row_count < total:
+        if row_count == 0 and (total is None or len(seen_dates) < total):
+            errors.append(
+                f"易方达第 {page_index} 页没有日期行，累计唯一日期 {len(seen_dates)}，"
+                f"响应 total 为 {total}，分页不完整"
+            )
+            break
+        page_dates = {
+            item.as_of_date
+            for item in parsed
+            if item.series == "unit_nav" and item.as_of_date
+        }
+        overlap = page_dates & seen_dates
+        if overlap:
+            sample = sorted(overlap)[:3]
+            errors.append(
+                f"易方达第 {page_index} 页与先前页日期重复（例 {', '.join(sample)}），"
+                f"拒绝按物理行数当成完成"
+            )
+            points.extend(
+                filter_window(attach_fetch(parsed, result), start, end, errors, f"易方达第 {page_index} 页")
+            )
+            break
+        if got_size and row_count < got_size and total is not None and len(seen_dates) + len(page_dates) < total:
             errors.append(
                 f"易方达第 {page_index} 页只有 {row_count} 行，响应 pageSize 为 {got_size}，"
-                f"累计仍少于 total {total}，分页不完整"
+                f"累计唯一日期仍少于 total {total}，分页不完整"
             )
             points.extend(
                 filter_window(attach_fetch(parsed, result), start, end, errors, f"易方达第 {page_index} 页")
@@ -144,8 +195,9 @@ def collect_efunds(client, start: date, end: date, *, page_size: int, use_cache:
             break
         kept = filter_window(attach_fetch(parsed, result), start, end, errors, f"易方达第 {page_index} 页")
         points.extend(kept)
-        date_rows += row_count
-        if total is not None and date_rows >= total:
+        seen_dates.update(page_dates)
+        physical_rows += row_count
+        if total is not None and len(seen_dates) >= total:
             break
         if row_count == 0:
             break
@@ -153,6 +205,8 @@ def collect_efunds(client, start: date, end: date, *, page_size: int, use_cache:
         if page_index > 30:
             errors.append("易方达分页超过 30 页，停止")
             break
-    if total is not None and date_rows < total and not any("分页不完整" in item for item in errors):
-        errors.append(f"易方达日期行 {date_rows} 少于响应 total {total}，分页不完整")
+    if total is not None and len(seen_dates) < total and not any("分页不完整" in item for item in errors):
+        errors.append(
+            f"易方达唯一日期 {len(seen_dates)}（物理行 {physical_rows}）少于响应 total {total}，分页不完整"
+        )
     return FetchBatch(SOURCE, points, errors, [], urls)

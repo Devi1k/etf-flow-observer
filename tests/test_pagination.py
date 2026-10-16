@@ -119,7 +119,7 @@ def test_szse_duplicate_rows_do_not_pick_one(store):
             "error": None,
         }
     ]
-    points, page_no, page_count = parse_szse(payload, "https://www.szse.cn/api")
+    points, page_no, page_count, _errs = parse_szse(payload, "https://www.szse.cn/api")
     assert (page_no, page_count) == (1, 1)
     ingest(store, points, shanghai(2026, 10, 16, 9, 0), phase="morning")
     row = store.latest_join("159919", "2026-10-15", "shares", "szse_shares")

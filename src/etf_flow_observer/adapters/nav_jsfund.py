@@ -4,6 +4,7 @@
 份额净值在前，累计净值在后。页面一次返回很长的历史，调用方按日期窗口截取。
 若主域名 DNS 或 TLS 失败，才显式改用同一 JSP 路径的 www.jsfund.cn，并在记录里写明。
 这不是第三方净值供应商。
+单元格各自解析：累计净值是 N/A 时仍保留有效份额净值；份额净值空白走缺失分支。
 """
 
 from __future__ import annotations
@@ -16,12 +17,11 @@ from etf_flow_observer.adapters.common import FetchBatch, RawPoint, attach_fetch
 
 SOURCE = "jsfund_nav"
 FUND = "159919"
-ROW = re.compile(
-    r"<tr>\s*<td>\s*(\d{4}-\d{2}-\d{2})\s*</td>\s*"
-    r"<td>\s*([0-9]+(?:\.[0-9]+)?|--)\s*</td>\s*"
-    r"<td>\s*([0-9]+(?:\.[0-9]+)?|--)?\s*</td>\s*</tr>",
-    re.IGNORECASE,
-)
+TR = re.compile(r"<tr\b[^>]*>(.*?)</tr>", re.IGNORECASE | re.DOTALL)
+TD = re.compile(r"<td\b[^>]*>(.*?)</td>", re.IGNORECASE | re.DOTALL)
+TAG = re.compile(r"<[^>]+>")
+DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+NUMBER_RE = re.compile(r"^[0-9]+(?:\.[0-9]+)?$")
 
 
 def build_url(base: str) -> str:
@@ -32,12 +32,46 @@ def build_url(base: str) -> str:
     return urlunsplit((parts.scheme or "https", parts.netloc, parts.path, query, ""))
 
 
+def _cell_text(raw: str) -> str:
+    return TAG.sub("", raw).replace("\xa0", " ").strip()
+
+
+def _is_missing_nav(text: str) -> bool:
+    return text in {"", "--"}
+
+
+def _is_usable_nav(text: str) -> bool:
+    return bool(NUMBER_RE.match(text))
+
+
 def parse_jsfund(html: str, source_url: str, *, used_fallback: bool) -> list[RawPoint]:
     note_flag = "主域名不可达，改用 www.jsfund.cn 上的同一嘉实 JSP" if used_fallback else "份额净值"
     points: list[RawPoint] = []
-    for nav_date, unit_nav, cumulative in ROW.findall(html):
+    for tr_html in TR.findall(html):
+        cells = [_cell_text(cell) for cell in TD.findall(tr_html)]
+        if len(cells) < 2:
+            continue
+        nav_date = cells[0]
+        if not DATE_RE.match(nav_date):
+            continue
+        unit_nav = cells[1] if len(cells) > 1 else ""
+        cumulative = cells[2] if len(cells) > 2 else ""
         flags = ["primary_host_unreachable_used_official_apex"] if used_fallback else []
-        if unit_nav in {"", "--"}:
+        if _is_usable_nav(unit_nav):
+            points.append(
+                RawPoint(
+                    fund_code=FUND,
+                    as_of_date=nav_date,
+                    series="unit_nav",
+                    original_value=unit_nav,
+                    original_unit="元",
+                    source_name=SOURCE,
+                    source_url=source_url,
+                    note=f"份额净值。{note_flag}",
+                    flags=list(flags),
+                )
+            )
+        elif _is_missing_nav(unit_nav):
             points.append(
                 RawPoint(
                     fund_code=FUND,
@@ -58,15 +92,16 @@ def parse_jsfund(html: str, source_url: str, *, used_fallback: bool) -> list[Raw
                     fund_code=FUND,
                     as_of_date=nav_date,
                     series="unit_nav",
-                    original_value=unit_nav,
+                    original_value="",
                     original_unit="元",
                     source_name=SOURCE,
                     source_url=source_url,
-                    note=f"份额净值。{note_flag}",
+                    note=f"份额净值单元格无效: {unit_nav!r}，拒绝改用累计净值",
+                    conflict=True,
                     flags=list(flags),
                 )
             )
-        if cumulative and cumulative != "--":
+        if _is_usable_nav(cumulative):
             points.append(
                 RawPoint(
                     fund_code=FUND,

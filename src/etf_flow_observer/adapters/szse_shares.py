@@ -35,27 +35,47 @@ def build_url(start: date, end: date, page: int) -> str:
     return f"{API}?{query}"
 
 
-def parse_szse(payload: object, source_url: str) -> tuple[list[RawPoint], int, int]:
+def parse_szse(payload: object, source_url: str) -> tuple[list[RawPoint], int, int, list[str]]:
     if not isinstance(payload, list) or not payload or not isinstance(payload[0], dict):
         raise ObserverError("深交所返回的不是预期的报表列表")
     block = payload[0]
     if block.get("error"):
         raise ObserverError(f"深交所报表错误: {block.get('error')}")
-    meta = block.get("metadata") or {}
-    page_no = int(meta.get("pageno") or 1)
-    page_count = int(meta.get("pagecount") or 1)
+    meta = block.get("metadata")
+    if meta is None:
+        meta = {}
+    if not isinstance(meta, dict):
+        raise ObserverError("深交所 metadata 不是对象")
+    try:
+        page_no = int(meta.get("pageno") if meta.get("pageno") is not None else 1)
+        page_count = int(meta.get("pagecount") if meta.get("pagecount") is not None else 1)
+    except (TypeError, ValueError) as exc:
+        raise ObserverError(f"深交所页码无效: {exc}") from exc
+    rows = block.get("data")
+    if rows is None:
+        rows = []
+    if not isinstance(rows, list):
+        raise ObserverError("深交所 data 不是列表")
     points: list[RawPoint] = []
-    for row in block.get("data") or []:
+    row_errors: list[str] = []
+    for index, row in enumerate(rows):
+        if not isinstance(row, dict):
+            row_errors.append(f"深交所第 {page_no} 页第 {index} 行不是对象: {type(row).__name__}")
+            continue
         code = str(row.get("fund_code") or "").strip()
         if code != FUND:
             continue
         size = row.get("current_size")
         if size in (None, ""):
             continue
+        as_of = str(row.get("size_date") or "").strip()
+        if not as_of:
+            row_errors.append(f"深交所第 {page_no} 页 {code} 缺少 size_date")
+            continue
         points.append(
             RawPoint(
                 fund_code=code,
-                as_of_date=str(row.get("size_date") or "").strip(),
+                as_of_date=as_of,
                 series="shares",
                 original_value=as_original_text(size),
                 original_unit="万份",
@@ -64,7 +84,7 @@ def parse_szse(payload: object, source_url: str) -> tuple[list[RawPoint], int, i
                 note=f"security_short_name={row.get('security_short_name') or ''}",
             )
         )
-    return points, page_no, page_count
+    return points, page_no, page_count, row_errors
 
 
 def collect_szse(client, start: date, end: date, *, use_cache: bool) -> FetchBatch:
@@ -88,10 +108,11 @@ def collect_szse(client, start: date, end: date, *, use_cache: bool) -> FetchBat
             break
         try:
             payload = result.json()
-            parsed, page_no, page_count = parse_szse(payload, result.url)
-        except (json.JSONDecodeError, ObserverError, ValueError) as exc:
+            parsed, page_no, page_count, row_errors = parse_szse(payload, result.url)
+        except (json.JSONDecodeError, ObserverError, ValueError, TypeError) as exc:
             errors.append(f"SZSE 第 {page} 页无法解析: {exc}")
             break
+        errors.extend(row_errors)
         if page_no != page:
             errors.append(f"SZSE 页码错位：请求 {page}，返回 {page_no}")
             break

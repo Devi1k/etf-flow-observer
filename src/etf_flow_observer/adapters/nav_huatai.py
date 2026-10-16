@@ -45,15 +45,28 @@ def build_url(start: date, end: date, page: int, page_size: int, site_id: str) -
     return f"{API}?{query}"
 
 
-def parse_huatai_table(payload: object, source_url: str) -> tuple[list[RawPoint], int, int]:
+def parse_huatai_table(payload: object, source_url: str) -> tuple[list[RawPoint], int, int, list[str]]:
     if not isinstance(payload, dict) or "dataList" not in payload:
         raise ObserverError("华泰柏瑞净值表返回的不是预期 JSON")
-    current = int(payload.get("currentPage") or 0)
-    total = int(payload.get("totalPage") or 0)
+    try:
+        current = int(payload.get("currentPage") if payload.get("currentPage") is not None else 0)
+        total = int(payload.get("totalPage") if payload.get("totalPage") is not None else 0)
+    except (TypeError, ValueError) as exc:
+        raise ObserverError(f"华泰柏瑞页码无效: {exc}") from exc
+    rows = payload.get("dataList")
+    if rows is None:
+        rows = []
+    if not isinstance(rows, list):
+        raise ObserverError("华泰柏瑞 dataList 不是列表")
     points: list[RawPoint] = []
-    for row in payload.get("dataList") or []:
+    row_errors: list[str] = []
+    for index, row in enumerate(rows):
+        if not isinstance(row, dict):
+            row_errors.append(f"华泰柏瑞第 {current} 页第 {index} 行不是对象: {type(row).__name__}")
+            continue
         nav_date = str(row.get("date") or "").strip()
         if not nav_date:
+            row_errors.append(f"华泰柏瑞第 {current} 页第 {index} 行缺少 date")
             continue
         net_value = row.get("netvalue")
         total_net = row.get("totalnetvalue")
@@ -97,7 +110,7 @@ def parse_huatai_table(payload: object, source_url: str) -> tuple[list[RawPoint]
                     note="字段 totalnetvalue，累计净值，不能当作单位净值",
                 )
             )
-    return points, current, total
+    return points, current, total, row_errors
 
 
 def parse_huatai_homepage(html: str) -> RawPoint | None:
@@ -152,10 +165,11 @@ def collect_huatai(
             notes.append("历史净值仍只找华泰柏瑞官网。失败时不改用第三方供应商。")
             break
         try:
-            parsed, current, total = parse_huatai_table(result.json(), result.url)
-        except (json.JSONDecodeError, ObserverError, ValueError) as exc:
+            parsed, current, total, row_errors = parse_huatai_table(result.json(), result.url)
+        except (json.JSONDecodeError, ObserverError, ValueError, TypeError) as exc:
             errors.append(f"华泰柏瑞第 {page} 页无法解析: {exc}")
             break
+        errors.extend(row_errors)
         if current != page:
             errors.append(f"华泰柏瑞页码错位：请求 {page}，返回 {current}")
             break

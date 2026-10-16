@@ -146,6 +146,22 @@ class UpsertResult:
 
 
 class Store:
+    # Columns added after the 2621ca0-era schema. CREATE IF NOT EXISTS alone
+    # leaves old databases without them; INSERT/SELECT then fails.
+    _RAW_FETCH_COLUMNS = (
+        ("content_sha256", "TEXT"),
+        ("network_fetched_at", "TEXT"),
+        ("cache_accessed_at", "TEXT"),
+        ("request_started_at", "TEXT"),
+        ("attempt_no", "INTEGER NOT NULL DEFAULT 1"),
+    )
+    _OBSERVATION_VERSION_COLUMNS = (
+        ("network_fetched_at", "TEXT"),
+        ("cache_accessed_at", "TEXT"),
+        ("observation_available_at", "TEXT"),
+    )
+    SCHEMA_VERSION = 2
+
     def __init__(self, db_path: Path, raw_dir: Path):
         self.db_path = Path(db_path)
         self.raw_dir = Path(raw_dir)
@@ -155,7 +171,7 @@ class Store:
         self.conn.row_factory = sqlite3.Row
         self.conn.execute("PRAGMA foreign_keys = ON")
         self.conn.executescript(SCHEMA)
-        self._ensure_column("raw_fetches", "request_started_at", "TEXT")
+        self._migrate()
         self.conn.commit()
 
     def close(self) -> None:
@@ -165,6 +181,28 @@ class Store:
         cols = {row[1] for row in self.conn.execute(f"PRAGMA table_info({table})")}
         if column not in cols:
             self.conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {decl}")
+
+    def _migrate(self) -> None:
+        """Upgrade an older SQLite file in place. Existing raw bodies and versions stay."""
+        self.conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS schema_version (
+                id INTEGER PRIMARY KEY CHECK (id = 1),
+                version INTEGER NOT NULL
+            )
+            """
+        )
+        for column, decl in self._RAW_FETCH_COLUMNS:
+            self._ensure_column("raw_fetches", column, decl)
+        for column, decl in self._OBSERVATION_VERSION_COLUMNS:
+            self._ensure_column("observation_versions", column, decl)
+        self.conn.execute(
+            """
+            INSERT INTO schema_version (id, version) VALUES (1, ?)
+            ON CONFLICT(id) DO UPDATE SET version = excluded.version
+            """,
+            (self.SCHEMA_VERSION,),
+        )
 
     def save_raw(
         self,
