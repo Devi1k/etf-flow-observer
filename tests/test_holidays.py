@@ -44,3 +44,15 @@ def test_configured_closure_blocks_a_weekday(store):
     ingest(store, [point], NOW, phase="morning", closures={date(2026, 10, 14)})
     row = store.latest_join("510310", "2026-10-14", "shares", "sse_shares")
     assert row["quality_status"] == "holiday_or_non_trading"
+
+
+def test_example_config_carries_official_2026_closures():
+    from pathlib import Path
+    import tomllib
+
+    cfg = tomllib.loads((Path(__file__).resolve().parents[1] / "config" / "example.toml").read_text(encoding="utf-8"))
+    closures = {date.fromisoformat(d) for d in cfg["calendar"]["closures"]}
+    for d in [date(2026, 9, 25), date(2026, 10, 1), date(2026, 10, 2), date(2026, 10, 5), date(2026, 10, 6), date(2026, 10, 7)]:
+        assert d in closures
+    days = expected_trading_days(date(2026, 9, 24), date(2026, 10, 9), closures)
+    assert days == [date(2026, 9, 24), date(2026, 9, 28), date(2026, 9, 29), date(2026, 9, 30), date(2026, 10, 8), date(2026, 10, 9)]
