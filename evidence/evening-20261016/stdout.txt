@@ -1,0 +1,11 @@
+[sse_shares] 写入 0 条，缺口记录 3 条
+  2026-10-16 上交所结果里没有 510300,510310,510330，不会记成 0
+[szse_shares] 写入 0 条，缺口记录 1 条
+[huatai_nav_table] 写入 3 条，缺口记录 0 条
+  首页静态表 2026-10-16 单位净值 4.2426
+  510300 2026-10-16 首页和历史表单位净值一致
+[efunds_nav] 写入 2 条，缺口记录 0 条
+[chinaamc_nav] 写入 2 条，缺口记录 0 条
+[jsfund_nav] 写入 0 条，缺口记录 2 条
+  嘉实主域名未拿到净值表: SSLEOFError: [SSL: UNEXPECTED_EOF_WHILE_READING] EOF occurred in violation of protocol (_ssl.c:1029)。改试 www.jsfund.cn 上的同一路径。
+  失败: 嘉实页面里没有窗口内的净值行

@@ -1,0 +1,7 @@
+id	fund_code	as_of_date	series	source_name	reason	fetched_at
+1	510300	2026-10-16	shares	sse_shares	no_exchange_row	2026-10-16T20:58:59+08:00
+2	510310	2026-10-16	shares	sse_shares	no_exchange_row	2026-10-16T20:58:59+08:00
+3	510330	2026-10-16	shares	sse_shares	no_exchange_row	2026-10-16T20:58:59+08:00
+4	159919	2026-10-16	shares	szse_shares	no_exchange_row	2026-10-16T20:58:59+08:00
+5	159919	2026-10-16	unit_nav	jsfund_nav	fetch_failed	2026-10-16T20:58:59+08:00
+6	159919	2026-10-16	cumulative_nav	jsfund_nav	fetch_failed	2026-10-16T20:58:59+08:00

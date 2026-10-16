@@ -1,0 +1,5 @@
+START=2026-10-16T20:58:59+08:00
+HEAD=789ac366de8a8ffe8a64a1c73dfa6572fe3ffc25
+CMD=.venv/bin/python -m etf_flow_observer --config /workspace/etf-flow-evidence/evening-20261016/config.toml collect all --session evening --homepage-cross-check
+END=2026-10-16T20:59:27+08:00
+EXIT_CODE=1

@@ -1,0 +1,20 @@
+原始响应 11 条，观察版本 7 条，缺口 6 条。
+chinaamc_nav cumulative_nav ok: 1
+chinaamc_nav unit_nav ok: 1
+efunds_nav cumulative_nav ok: 1
+efunds_nav unit_nav ok: 1
+huatai_homepage unit_nav ok: 1
+huatai_nav_table cumulative_nav ok: 1
+huatai_nav_table unit_nav ok: 1
+缺口 2026-10-16 159919 cumulative_nav jsfund_nav fetch_failed
+缺口 2026-10-16 159919 shares szse_shares no_exchange_row
+缺口 2026-10-16 159919 unit_nav jsfund_nav fetch_failed
+缺口 2026-10-16 510300 shares sse_shares no_exchange_row
+缺口 2026-10-16 510310 shares sse_shares no_exchange_row
+缺口 2026-10-16 510330 shares sse_shares no_exchange_row
+数据日 2026-10-16
+  510300 没有份额，不记 0
+  510310 没有份额，不记 0
+  510330 没有份额，不记 0
+  159919 没有份额，不记 0
+  四只合计：没有。缺 510300、510310、510330、159919。不会把缺的当成 0。
