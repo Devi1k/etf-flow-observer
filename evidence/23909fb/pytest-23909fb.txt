@@ -1,0 +1,25 @@
+SHA: 23909fbf3513bfcbe3bbe2acd8fb62913d795dda
+time: 2026-10-16T20:44:10+08:00
+Python 3.13.5
+pytest 9.1.1
+============================= test session starts ==============================
+platform linux -- Python 3.13.5, pytest-9.1.1, pluggy-1.7.0
+rootdir: /workspace/etf-flow-observer
+configfile: pyproject.toml
+testpaths: tests
+collected 59 items
+
+tests/test_abnormal_jump.py ...                                          [  5%]
+tests/test_acceptance_remaining.py .....                                 [ 13%]
+tests/test_holidays.py ...                                               [ 18%]
+tests/test_idempotent.py ..                                              [ 22%]
+tests/test_labels_and_config.py ....                                     [ 28%]
+tests/test_missing_stale.py ...                                          [ 33%]
+tests/test_nav_fields.py ...                                             [ 38%]
+tests/test_pagination.py .....                                           [ 47%]
+tests/test_review_ak.py ....................                             [ 81%]
+tests/test_revise.py ...                                                 [ 86%]
+tests/test_signal_time.py .....                                          [ 94%]
+tests/test_standardize.py ...                                            [100%]
+
+============================== 59 passed in 0.36s ==============================

@@ -1,0 +1,10 @@
+fund	series	date	source	orig	status	flags	phase	auth	network_fetched_at
+159919	shares	2026-10-15	szse_shares	685,191.66	ok	["abs_change_ratio=0.001842"]	morning	1	2026-10-16T20:44:31+08:00
+159919	unit_nav	2026-10-15	jsfund_nav	4.4226	ok	["primary_host_unreachable_used_official_apex"]	morning	1	2026-10-16T20:44:59+08:00
+510300	shares	2026-10-15	sse_shares	2548488.77	ok	["abs_change_ratio=0.032187"]	morning	1	2026-10-16T20:44:29+08:00
+510300	unit_nav	2026-10-15	huatai_nav_table	4.2366	ok	[]	morning	1	2026-10-16T20:44:37+08:00
+510300	unit_nav	2026-10-16	huatai_homepage	4.2426	ok	[]	evening	1	2026-10-16T20:44:44+08:00
+510310	shares	2026-10-15	sse_shares	1672624.4	abnormal_jump	["abs_change_ratio=0.375859", "abnormal_jump"]	morning	0	2026-10-16T20:44:29+08:00
+510310	unit_nav	2026-10-15	efunds_nav	4.1164	ok	[]	morning	1	2026-10-16T20:44:34+08:00
+510330	shares	2026-10-15	sse_shares	862404.98	ok	["abs_change_ratio=0.005667"]	morning	1	2026-10-16T20:44:29+08:00
+510330	unit_nav	2026-10-15	chinaamc_nav	4.4176	ok	[]	morning	1	2026-10-16T20:44:45+08:00

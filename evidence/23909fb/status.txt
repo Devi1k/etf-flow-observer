@@ -1,0 +1,111 @@
+原始响应 18 条，观察版本 181 条，缺口 44 条。
+chinaamc_nav cumulative_nav exploratory_backfill: 52
+chinaamc_nav cumulative_nav ok: 1
+chinaamc_nav unit_nav exploratory_backfill: 52
+chinaamc_nav unit_nav ok: 1
+efunds_nav cumulative_nav exploratory_backfill: 6
+efunds_nav cumulative_nav ok: 1
+efunds_nav unit_nav exploratory_backfill: 6
+efunds_nav unit_nav ok: 1
+huatai_homepage unit_nav ok: 1
+huatai_nav_table cumulative_nav exploratory_backfill: 6
+huatai_nav_table cumulative_nav ok: 1
+huatai_nav_table unit_nav exploratory_backfill: 6
+huatai_nav_table unit_nav ok: 1
+jsfund_nav cumulative_nav exploratory_backfill: 5
+jsfund_nav cumulative_nav ok: 1
+jsfund_nav unit_nav exploratory_backfill: 5
+jsfund_nav unit_nav ok: 1
+sse_shares shares abnormal_jump: 1
+sse_shares shares exploratory_backfill: 3
+sse_shares shares ok: 2
+szse_shares shares exploratory_backfill: 27
+szse_shares shares ok: 1
+缺口 2026-09-25 159919 shares szse_shares no_exchange_row
+缺口 2026-09-25 510330 cumulative_nav chinaamc_nav no_exchange_row
+缺口 2026-09-25 510330 unit_nav chinaamc_nav no_exchange_row
+缺口 2026-10-01 159919 shares szse_shares no_exchange_row
+缺口 2026-10-01 510300 cumulative_nav huatai_nav_table no_exchange_row
+缺口 2026-10-01 510300 unit_nav huatai_nav_table no_exchange_row
+缺口 2026-10-01 510310 cumulative_nav efunds_nav no_exchange_row
+缺口 2026-10-01 510310 unit_nav efunds_nav no_exchange_row
+缺口 2026-10-01 510330 cumulative_nav chinaamc_nav no_exchange_row
+缺口 2026-10-01 510330 unit_nav chinaamc_nav no_exchange_row
+缺口 2026-10-02 159919 shares szse_shares no_exchange_row
+缺口 2026-10-02 510300 cumulative_nav huatai_nav_table no_exchange_row
+缺口 2026-10-02 510300 unit_nav huatai_nav_table no_exchange_row
+缺口 2026-10-02 510310 cumulative_nav efunds_nav no_exchange_row
+缺口 2026-10-02 510310 unit_nav efunds_nav no_exchange_row
+缺口 2026-10-02 510330 cumulative_nav chinaamc_nav no_exchange_row
+缺口 2026-10-02 510330 unit_nav chinaamc_nav no_exchange_row
+缺口 2026-10-05 159919 cumulative_nav jsfund_nav no_exchange_row
+缺口 2026-10-05 159919 shares szse_shares no_exchange_row
+缺口 2026-10-05 159919 unit_nav jsfund_nav no_exchange_row
+缺口 2026-10-05 510300 cumulative_nav huatai_nav_table no_exchange_row
+缺口 2026-10-05 510300 unit_nav huatai_nav_table no_exchange_row
+缺口 2026-10-05 510310 cumulative_nav efunds_nav no_exchange_row
+缺口 2026-10-05 510310 unit_nav efunds_nav no_exchange_row
+缺口 2026-10-05 510330 cumulative_nav chinaamc_nav no_exchange_row
+缺口 2026-10-05 510330 unit_nav chinaamc_nav no_exchange_row
+缺口 2026-10-06 159919 cumulative_nav jsfund_nav no_exchange_row
+缺口 2026-10-06 159919 shares szse_shares no_exchange_row
+缺口 2026-10-06 159919 unit_nav jsfund_nav no_exchange_row
+缺口 2026-10-06 510300 cumulative_nav huatai_nav_table no_exchange_row
+缺口 2026-10-06 510300 unit_nav huatai_nav_table no_exchange_row
+缺口 2026-10-06 510310 cumulative_nav efunds_nav no_exchange_row
+缺口 2026-10-06 510310 unit_nav efunds_nav no_exchange_row
+缺口 2026-10-06 510330 cumulative_nav chinaamc_nav no_exchange_row
+缺口 2026-10-06 510330 unit_nav chinaamc_nav no_exchange_row
+缺口 2026-10-07 159919 cumulative_nav jsfund_nav no_exchange_row
+缺口 2026-10-07 159919 shares szse_shares no_exchange_row
+缺口 2026-10-07 159919 unit_nav jsfund_nav no_exchange_row
+缺口 2026-10-07 510300 cumulative_nav huatai_nav_table no_exchange_row
+缺口 2026-10-07 510300 unit_nav huatai_nav_table no_exchange_row
+数据日 2026-10-16
+  510300 没有份额，不记 0
+  510310 没有份额，不记 0
+  510330 没有份额，不记 0
+  159919 没有份额，不记 0
+  四只合计：没有。缺 510300、510310、510330、159919。不会把缺的当成 0。
+数据日 2026-10-15
+  510300 研究估计 3366826020 元（份额变化乘当日单位净值，不是现金流入，也不是可执行信号）。上一笔份额状态为 exploratory_backfill。
+  510310 份额 16726244000 份，状态 abnormal_jump，净值状态 ok，不计算可执行申赎
+  510330 研究估计 214695360 元（份额变化乘当日单位净值，不是现金流入，也不是可执行信号）。上一笔份额状态为 exploratory_backfill。
+  159919 研究估计 55724760 元（份额变化乘当日单位净值，不是现金流入，也不是可执行信号）。上一笔份额状态为 exploratory_backfill。
+  四只合计：没有。缺 510310。不会把缺的当成 0。
+数据日 2026-10-14
+  510300 没有相邻交易日 2026-10-13 的份额，不能用更早的非空值代替，也不计算变化
+  510310 没有相邻交易日 2026-10-13 的份额，不能用更早的非空值代替，也不计算变化
+  510330 没有相邻交易日 2026-10-13 的份额，不能用更早的非空值代替，也不计算变化
+  159919 份额 6839316600 份，状态 exploratory_backfill，净值状态 exploratory_backfill，不计算可执行申赎
+  四只合计：没有。缺 510300、510310、510330、159919。不会把缺的当成 0。
+数据日 2026-10-13
+  510300 没有份额，不记 0
+  510310 没有份额，不记 0
+  510330 没有份额，不记 0
+  159919 份额 6848316600 份，状态 exploratory_backfill，净值状态 exploratory_backfill，不计算可执行申赎
+  四只合计：没有。缺 510300、510310、510330、159919。不会把缺的当成 0。
+数据日 2026-10-12
+  510300 没有份额，不记 0
+  510310 没有份额，不记 0
+  510330 没有份额，不记 0
+  159919 份额 6844716600 份，状态 exploratory_backfill，净值状态 exploratory_backfill，不计算可执行申赎
+  四只合计：没有。缺 510300、510310、510330、159919。不会把缺的当成 0。
+数据日 2026-10-09
+  510300 没有份额，不记 0
+  510310 没有份额，不记 0
+  510330 没有份额，不记 0
+  159919 份额 6856416600 份，状态 exploratory_backfill，净值状态 exploratory_backfill，不计算可执行申赎
+  四只合计：没有。缺 510300、510310、510330、159919。不会把缺的当成 0。
+数据日 2026-10-08
+  510300 没有份额，不记 0
+  510310 没有份额，不记 0
+  510330 没有份额，不记 0
+  159919 没有相邻交易日 2026-10-07 的份额，不能用更早的非空值代替，也不计算变化
+  四只合计：没有。缺 510300、510310、510330、159919。不会把缺的当成 0。
+数据日 2026-09-30
+  510300 没有份额，不记 0
+  510310 没有份额，不记 0
+  510330 没有份额，不记 0
+  159919 份额 6866316600 份，状态 exploratory_backfill，净值状态 missing，不计算可执行申赎
+  四只合计：没有。缺 510300、510310、510330、159919。不会把缺的当成 0。

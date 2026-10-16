@@ -1,0 +1,21 @@
+id	source	status	cache	request_started_at	network_fetched_at	resp_s	error	url
+1	sse_shares	200	0	2026-10-16T20:44:11+08:00	2026-10-16T20:44:19+08:00	8.0		https://query.sse.com.cn/commonQuery.do?isPagination=true&pageHelp.pageSize=1000&pageHelp.pageNo=1&sqlId=COMMON_SSE_ZQPZ_ETFZL_XXPL_ETFGM_SE
+2	sse_shares	200	0	2026-10-16T20:44:19+08:00	2026-10-16T20:44:29+08:00	10.0		https://query.sse.com.cn/commonQuery.do?isPagination=true&pageHelp.pageSize=1000&pageHelp.pageNo=1&sqlId=COMMON_SSE_ZQPZ_ETFZL_XXPL_ETFGM_SE
+3	szse_shares	200	0	2026-10-16T20:44:29+08:00	2026-10-16T20:44:31+08:00	2.0		https://www.szse.cn/api/report/ShowReport/data?SHOWTYPE=JSON&CATALOGID=scsj_fund_jjgm&jjlb=ETF&txtDm=159919&txtStart=2026-08-31&txtEnd=2026-
+4	szse_shares	200	0	2026-10-16T20:44:31+08:00	2026-10-16T20:44:32+08:00	1.0		https://www.szse.cn/api/report/ShowReport/data?SHOWTYPE=JSON&CATALOGID=scsj_fund_jjgm&jjlb=ETF&txtDm=159919&txtStart=2026-08-31&txtEnd=2026-
+5	efunds_nav	200	0	2026-10-16T20:44:32+08:00	2026-10-16T20:44:34+08:00	2.0		https://api.efunds.com.cn/xcowch/front/fund/nav
+6	efunds_nav	200	0	2026-10-16T20:44:34+08:00	2026-10-16T20:44:35+08:00	1.0		https://api.efunds.com.cn/xcowch/front/fund/nav
+7	huatai_nav_table	200	0	2026-10-16T20:44:35+08:00	2026-10-16T20:44:37+08:00	2.0		https://www.huatai-pb.com/common-web/chart/fundnettable/getFundNetTableJson?fundcode=510300&from=2026-09-30&to=2026-10-15&pages=1-5&siteId=9
+8	huatai_nav_table	200	0	2026-10-16T20:44:37+08:00	2026-10-16T20:44:39+08:00	2.0		https://www.huatai-pb.com/common-web/chart/fundnettable/getFundNetTableJson?fundcode=510300&from=2026-09-30&to=2026-10-15&pages=2-5&siteId=9
+9	huatai_homepage	200	0	2026-10-16T20:44:39+08:00	2026-10-16T20:44:44+08:00	5.0		https://www.huatai-pb.com/
+10	chinaamc_nav	200	0	2026-10-16T20:44:44+08:00	2026-10-16T20:44:45+08:00	1.0		https://www.chinaamc.com/product/fundLishijingzhi.do?fundcode=510330
+11	chinaamc_nav	200	0	2026-10-16T20:44:46+08:00	2026-10-16T20:44:49+08:00	3.0		https://www.chinaamc.com/product/fundLishijingzhi.do?fundcode=510330
+12	chinaamc_nav	200	0	2026-10-16T20:44:49+08:00	2026-10-16T20:44:52+08:00	3.0		https://www.chinaamc.com/product/fundLishijingzhi.do?fundcode=510330
+13	jsfund_nav	None	0	2026-10-16T20:44:52+08:00	2026-10-16T20:44:53+08:00	1.0	SSLEOFError: [SSL: UNEXPECTED_EOF_WHILE_READING] EOF occurred in violation of protocol (_ssl.c:1029)	https://www.jsfund.com.cn/Services/cn/jsp/product/NavHistory.jsp?FundCode=159919&SiteID=1
+14	jsfund_nav	None	0	2026-10-16T20:44:55+08:00	2026-10-16T20:44:55+08:00	0.0	SSLEOFError: [SSL: UNEXPECTED_EOF_WHILE_READING] EOF occurred in violation of protocol (_ssl.c:1029)	https://www.jsfund.com.cn/Services/cn/jsp/product/NavHistory.jsp?FundCode=159919&SiteID=1
+15	jsfund_nav	None	0	2026-10-16T20:44:57+08:00	2026-10-16T20:44:57+08:00	0.0	SSLEOFError: [SSL: UNEXPECTED_EOF_WHILE_READING] EOF occurred in violation of protocol (_ssl.c:1029)	https://www.jsfund.com.cn/Services/cn/jsp/product/NavHistory.jsp?FundCode=159919&SiteID=1
+16	jsfund_nav	200	0	2026-10-16T20:44:57+08:00	2026-10-16T20:44:59+08:00	2.0		https://www.jsfund.cn/Services/cn/jsp/product/NavHistory.jsp?FundCode=159919&SiteID=1
+17	sse_shares	200	0	2026-10-16T20:44:59+08:00	2026-10-16T20:45:06+08:00	7.0		https://query.sse.com.cn/commonQuery.do?isPagination=true&pageHelp.pageSize=1000&pageHelp.pageNo=1&sqlId=COMMON_SSE_ZQPZ_ETFZL_XXPL_ETFGM_SE
+18	sse_shares	200	0	2026-10-16T20:45:06+08:00	2026-10-16T20:45:14+08:00	8.0		https://query.sse.com.cn/commonQuery.do?isPagination=true&pageHelp.pageSize=1000&pageHelp.pageNo=1&sqlId=COMMON_SSE_ZQPZ_ETFZL_XXPL_ETFGM_SE
+
+fund	series	date	source	orig	status	phase	auth	network_fetched_at
