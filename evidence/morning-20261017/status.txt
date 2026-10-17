@@ -1,0 +1,18 @@
+原始响应 10 条，观察版本 13 条，缺口 0 条。
+chinaamc_nav cumulative_nav ok: 1
+chinaamc_nav unit_nav ok: 1
+efunds_nav cumulative_nav ok: 1
+efunds_nav unit_nav ok: 1
+huatai_homepage unit_nav ok: 1
+huatai_nav_table cumulative_nav ok: 1
+huatai_nav_table unit_nav ok: 1
+jsfund_nav cumulative_nav ok: 1
+jsfund_nav unit_nav ok: 1
+sse_shares shares ok: 3
+szse_shares shares ok: 1
+数据日 2026-10-16
+  510300 没有相邻交易日 2026-10-15 的份额，不能用更早的非空值代替，也不计算变化
+  510310 没有相邻交易日 2026-10-15 的份额，不能用更早的非空值代替，也不计算变化
+  510330 没有相邻交易日 2026-10-15 的份额，不能用更早的非空值代替，也不计算变化
+  159919 没有相邻交易日 2026-10-15 的份额，不能用更早的非空值代替，也不计算变化
+  四只合计：没有。缺 510300、510310、510330、159919。不会把缺的当成 0。

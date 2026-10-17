@@ -1,0 +1,13 @@
+==== LIVE MORNING COLLECT BEGIN 2026-10-17T08:25:59+08:00 ====
+HEAD=789ac366de8a8ffe8a64a1c73dfa6572fe3ffc25
+CMD=.venv/bin/python -m etf_flow_observer --config /workspace/etf-flow-evidence/morning-20261017/config.toml collect all --session morning --homepage-cross-check
+[sse_shares] 写入 3 条，缺口记录 0 条
+[szse_shares] 写入 1 条，缺口记录 0 条
+[huatai_nav_table] 写入 3 条，缺口记录 0 条
+  首页静态表 2026-10-16 单位净值 4.2426
+  510300 2026-10-16 首页和历史表单位净值一致
+[efunds_nav] 写入 2 条，缺口记录 0 条
+[chinaamc_nav] 写入 2 条，缺口记录 0 条
+[jsfund_nav] 写入 2 条，缺口记录 0 条
+  嘉实主域名未拿到净值表: SSLEOFError: [SSL: UNEXPECTED_EOF_WHILE_READING] EOF occurred in violation of protocol (_ssl.c:1029)。改试 www.jsfund.cn 上的同一路径。
+==== LIVE MORNING COLLECT END 2026-10-17T08:26:24+08:00 EXIT=0 ====
