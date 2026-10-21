@@ -1,0 +1,60 @@
+# 从仓库根目录运行。data/ 只留在本地，不要提交原始响应。
+
+[storage]
+db_path = "/workspace/etf-flow-evidence/same-db-20261021/live.sqlite"
+raw_dir = "/workspace/etf-flow-evidence/same-db-20261021/raw"
+
+[universe]
+# 程序会拒绝任何其他名单。
+fund_codes = ["510300", "510310", "510330", "159919"]
+
+[http]
+min_interval_seconds = 2
+timeout_seconds = 30
+max_retries = 3
+cache_ttl_seconds = 43200
+# 交易所页面会对非浏览器请求返回空或重置连接。这是公开页面的访问方式，不是隐藏身份。
+user_agent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36"
+
+[backfill]
+# 上交所按日请求，一次能拉出全部 ETF。默认最多 5 个数据日，避免把未验收的 120 日回补打满。
+max_sse_dates_per_run = 5
+max_http_requests = 40
+
+[quality]
+abnormal_share_jump_ratio = "0.20"
+split_or_merge_ratio = "0.50"
+stale_after_hours = 36
+
+[timing]
+timezone = "Asia/Shanghai"
+morning_start = "08:00"
+session_close = "15:00"
+
+[calendar]
+# 周末由程序判断。这里只填已经核对过的额外休市日，不要预填没核对的节假日。
+# 2026 年工作日休市，依据上证公告〔2025〕45号、深证会〔2025〕481号及节前公告，来源见 docs/calendar-2026.md。
+# 公告里的周末休市（含调休周六 2/14、2/28、5/9、9/20、10/10）程序按周末处理，不必列。
+closures = [
+  "2026-01-01", "2026-01-02",                                         # 元旦
+  "2026-02-16", "2026-02-17", "2026-02-18", "2026-02-19", "2026-02-20", "2026-02-23",  # 春节
+  "2026-04-06",                                                       # 清明
+  "2026-05-01", "2026-05-04", "2026-05-05",                           # 劳动节
+  "2026-06-19",                                                       # 端午
+  "2026-09-25",                                                       # 中秋
+  "2026-10-01", "2026-10-02", "2026-10-05", "2026-10-06", "2026-10-07",  # 国庆
+]
+
+[sources.sse]
+page_size = 1000
+
+[sources.efunds]
+page_size = 150
+
+[sources.huatai]
+page_size = 10
+site_id = "9496d23c648f4a72a79150c3f2ac669b"
+
+[sources.jsfund]
+primary_url = "https://www.jsfund.com.cn/Services/cn/jsp/product/NavHistory.jsp"
+fallback_url = "https://www.jsfund.cn/Services/cn/jsp/product/NavHistory.jsp"

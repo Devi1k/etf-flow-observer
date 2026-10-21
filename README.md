@@ -66,6 +66,10 @@ tests/                           用夹具覆盖的校验，不访问网络
 data/                            本地库和原始响应，不提交
 ```
 
+## 同库晚间→次晨对照（证据 A 准备）
+
+跨库晚间/次晨快照不算同库成对。操作与验收见 `docs/same-db-evening-morning.md`，脚本 `scripts/same_db_pair.sh`。准备说明在 `evidence/same-db-pair-prep/`。**不**安装 crontab，**不**启动连续灰度；`sim-check` 仍须退出码 2。
+
 ## 当前边界
 
 代码里已经有适配器、限速、缓存、断点、版本化 SQLite 和校验。单元测试不访问网络。2026-10-16 的现场核对记在 `docs/live-smoke.md`：四个净值源和两家交易所份额都有可解析结果，但嘉实主域名当天没有 DNS，510310 的份额跳变挡住了四只合计。那份记录只描述这一次运行。A–K 修订说明在 `docs/review-response-AK.md`。晚间对照早间的现场修订、120 日回补、知识截止回放和模拟参数都还没有验收。`sim-check` 仍应返回退出码 2。
