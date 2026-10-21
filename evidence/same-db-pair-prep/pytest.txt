@@ -1,5 +1,2 @@
-# pytest @ prepare wall-clock 2026-10-21 Asia/Shanghai (before evening window)
-# command: .venv/bin/pytest -q
-# result: 67 passed (60 prior on 789ac36 + 7 in tests/test_same_db_evening_morning.py)
-...................................................................      [100%]
-67 passed
+........................................................................ [ 90%]
+........                                                                 [100%]

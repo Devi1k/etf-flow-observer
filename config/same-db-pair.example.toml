@@ -13,6 +13,7 @@ min_interval_seconds = 2
 timeout_seconds = 30
 max_retries = 3
 cache_ttl_seconds = 43200
+# same_db_pair.sh morning always passes --no-cache so this TTL cannot reuse the evening body.
 # 交易所页面会对非浏览器请求返回空或重置连接。这是公开页面的访问方式，不是隐藏身份。
 user_agent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36"
 

@@ -6,9 +6,16 @@
 #   ./scripts/same_db_pair.sh init              # create evidence dir + config (once)
 #   ./scripts/same_db_pair.sh evening           # after 15:00 Asia/Shanghai on a trading day
 #   ./scripts/same_db_pair.sh morning           # after 08:00 next natural day (not Monday-for-Friday)
-#   ./scripts/same_db_pair.sh verify            # inspect the SAME live.sqlite
+#   ./scripts/same_db_pair.sh verify            # inspect the SAME live.sqlite (field mode)
 #   ./scripts/same_db_pair.sh sim-check         # must print EXIT:2
 #   ./scripts/same_db_pair.sh status
+#
+# Exit codes (morning / verify):
+#   0  pass (verify field acceptance)
+#   1  verify hard fail (even if collect exited 0)
+#   2  usage / missing DB / config db_path ≠ EVIDENCE_ROOT/live.sqlite
+#   3  pending-evidence (pair incomplete / uncovered; NOT acceptance)
+#   other  collect process exit
 #
 # Override:
 #   EVIDENCE_ROOT=/path DATA_DAY=2026-10-21 ./scripts/same_db_pair.sh evening
@@ -21,6 +28,7 @@ EVIDENCE_ROOT="${EVIDENCE_ROOT:-/workspace/etf-flow-evidence/same-db-20261021}"
 CONFIG="${CONFIG:-$EVIDENCE_ROOT/config.toml}"
 PY="${PY:-$ROOT/.venv/bin/python}"
 OBS="${OBS:-$ROOT/.venv/bin/etf-flow-observer}"
+EXPECTED_DB="$EVIDENCE_ROOT/live.sqlite"
 
 need_venv() {
   if [[ ! -x "$PY" ]]; then
@@ -31,6 +39,57 @@ need_venv() {
 
 shanghai_now() {
   TZ=Asia/Shanghai date '+%Y-%m-%dT%H:%M:%S%z'
+}
+
+# Resolve config storage.db_path and refuse collect/verify if it is not EVIDENCE_ROOT/live.sqlite.
+assert_db_identity() {
+  need_venv
+  if [[ ! -f "$CONFIG" ]]; then
+    echo "missing config: $CONFIG (run init first)" >&2
+    exit 2
+  fi
+  local resolved expected
+  resolved="$("$PY" - <<PY
+from pathlib import Path
+from etf_flow_observer.config import load_config
+cfg = load_config(Path("$CONFIG"))
+print(cfg.db_path.expanduser().resolve())
+PY
+)"
+  expected="$(mkdir -p "$EVIDENCE_ROOT" && "$PY" -c "from pathlib import Path; print(Path('$EXPECTED_DB').expanduser().resolve())")"
+  if [[ "$resolved" != "$expected" ]]; then
+    echo "REFUSE: config db_path ($resolved) != EVIDENCE_ROOT/live.sqlite ($expected)" >&2
+    echo "fix config storage.db_path or EVIDENCE_ROOT/CONFIG so collect and verify share one DB." >&2
+    exit 2
+  fi
+  echo "db_identity_ok resolved=$resolved"
+}
+
+record_continuity() {
+  local leg="$1" log="$2"
+  need_venv
+  local meta="$log/continuity.txt"
+  {
+    echo "leg=$leg"
+    echo "wall_clock=$(shanghai_now)"
+    echo "evidence_root=$EVIDENCE_ROOT"
+    echo "config=$CONFIG"
+    echo "expected_db=$EXPECTED_DB"
+    "$PY" - <<PY
+from pathlib import Path
+from etf_flow_observer.config import load_config
+cfg = load_config(Path("$CONFIG"))
+db = cfg.db_path.expanduser().resolve()
+print(f"resolved_db={db}")
+print(f"db_exists={db.is_file()}")
+if db.is_file():
+    st = db.stat()
+    print(f"db_size={st.st_size}")
+    print(f"db_mtime_ns={st.st_mtime_ns}")
+    print(f"db_inode={st.st_ino}")
+PY
+    echo "git_sha=$(git -C "$ROOT" rev-parse HEAD)"
+  } | tee "$meta"
 }
 
 cmd_init() {
@@ -52,6 +111,8 @@ cmd_init() {
 - Not continuous gray; no crontab installed by these scripts
 - Universe locked: 510300 / 510310 / 510330 / 159919
 - Cross-DB prior evidence does not count
+- Morning collect uses \`--no-cache\` so the 12h HTTP cache cannot reuse the evening body
+- \`verify\` field mode exit 0=pass, 1=fail, 3=pending-evidence (not acceptance)
 
 ## Sequence (Asia/Shanghai)
 
@@ -70,6 +131,7 @@ MD
 cmd_evening() {
   need_venv
   cmd_init
+  assert_db_identity
   local stamp log
   stamp="$(TZ=Asia/Shanghai date '+%Y%m%dT%H%M%S%z')"
   log="$EVIDENCE_ROOT/logs/evening-$stamp"
@@ -77,10 +139,11 @@ cmd_evening() {
   {
     echo "wall_clock_start=$(shanghai_now)"
     echo "config=$CONFIG"
-    echo "db=$EVIDENCE_ROOT/live.sqlite"
+    echo "db=$EXPECTED_DB"
     echo "git_sha=$(git -C "$ROOT" rev-parse HEAD)"
     echo "cmd=$OBS --config $CONFIG collect all --session evening --homepage-cross-check"
   } | tee "$log/run-meta.txt"
+  record_continuity evening "$log"
   set +e
   "$OBS" --config "$CONFIG" collect all --session evening --homepage-cross-check \
     >"$log/stdout.txt" 2>"$log/stderr.txt"
@@ -89,17 +152,19 @@ cmd_evening() {
   echo "wall_clock_end=$(shanghai_now)" | tee -a "$log/run-meta.txt"
   echo "exit_code=$ec" | tee -a "$log/run-meta.txt"
   "$OBS" --config "$CONFIG" status >"$log/status.txt" || true
-  "$PY" "$ROOT/scripts/export_pair_snapshot.py" --db "$EVIDENCE_ROOT/live.sqlite" --out "$log"
+  "$PY" "$ROOT/scripts/export_pair_snapshot.py" --db "$EXPECTED_DB" --out "$log"
+  record_continuity evening-end "$log"
   echo "evening leg done exit=$ec log=$log"
   exit "$ec"
 }
 
 cmd_morning() {
   need_venv
-  if [[ ! -f "$EVIDENCE_ROOT/live.sqlite" ]]; then
+  if [[ ! -f "$EXPECTED_DB" ]]; then
     echo "missing live.sqlite — run evening first on this same path" >&2
     exit 2
   fi
+  assert_db_identity
   local stamp log
   stamp="$(TZ=Asia/Shanghai date '+%Y%m%dT%H%M%S%z')"
   log="$EVIDENCE_ROOT/logs/morning-$stamp"
@@ -107,26 +172,47 @@ cmd_morning() {
   {
     echo "wall_clock_start=$(shanghai_now)"
     echo "config=$CONFIG"
-    echo "db=$EVIDENCE_ROOT/live.sqlite"
+    echo "db=$EXPECTED_DB"
     echo "git_sha=$(git -C "$ROOT" rev-parse HEAD)"
-    echo "cmd=$OBS --config $CONFIG collect all --session morning --homepage-cross-check"
+    echo "cmd=$OBS --config $CONFIG collect all --session morning --homepage-cross-check --no-cache"
     echo "note=MUST be natural next morning; Monday-for-Friday is backfill and does not count"
+    echo "note=--no-cache required so 12h TTL cannot reuse evening response as morning source"
   } | tee "$log/run-meta.txt"
+  record_continuity morning "$log"
   set +e
-  "$OBS" --config "$CONFIG" collect all --session morning --homepage-cross-check \
+  # Morning must not reuse evening HTTP body via the default 12h cache.
+  "$OBS" --config "$CONFIG" collect all --session morning --homepage-cross-check --no-cache \
     >"$log/stdout.txt" 2>"$log/stderr.txt"
-  ec=$?
+  collect_ec=$?
   set -e
   echo "wall_clock_end=$(shanghai_now)" | tee -a "$log/run-meta.txt"
-  echo "exit_code=$ec" | tee -a "$log/run-meta.txt"
+  echo "collect_exit_code=$collect_ec" | tee -a "$log/run-meta.txt"
   "$OBS" --config "$CONFIG" status >"$log/status.txt" || true
-  "$PY" "$ROOT/scripts/export_pair_snapshot.py" --db "$EVIDENCE_ROOT/live.sqlite" --out "$log"
+  if [[ -f "$EXPECTED_DB" ]]; then
+    "$PY" "$ROOT/scripts/export_pair_snapshot.py" --db "$EXPECTED_DB" --out "$log"
+  fi
   local data_day
   data_day="${DATA_DAY:-$(TZ=Asia/Shanghai date -d 'yesterday' '+%Y-%m-%d' 2>/dev/null || python3 -c 'from datetime import date,timedelta; print((date.today()-timedelta(days=1)).isoformat())')}"
-  "$PY" "$ROOT/scripts/verify_same_db_pair.py" --db "$EVIDENCE_ROOT/live.sqlite" --data-day "$data_day" \
-    | tee "$log/verify.txt" || true
-  echo "morning leg done exit=$ec log=$log data_day=$data_day"
-  exit "$ec"
+  set +e
+  "$PY" "$ROOT/scripts/verify_same_db_pair.py" --mode field --db "$EXPECTED_DB" --data-day "$data_day" \
+    | tee "$log/verify.txt"
+  verify_ec=${PIPESTATUS[0]}
+  set -e
+  echo "verify_exit_code=$verify_ec" | tee -a "$log/run-meta.txt"
+  echo "data_day=$data_day" | tee -a "$log/run-meta.txt"
+  record_continuity morning-end "$log"
+  echo "morning leg done collect_exit=$collect_ec verify_exit=$verify_ec log=$log data_day=$data_day"
+  # Distinguish collect failure / verify fail / pending / pass. Never exit 0 when verify failed.
+  if [[ "$collect_ec" -ne 0 ]]; then
+    exit "$collect_ec"
+  fi
+  case "$verify_ec" in
+    0) exit 0 ;;
+    1) exit 1 ;;
+    3) exit 3 ;;
+    2) exit 2 ;;
+    *) exit "$verify_ec" ;;
+  esac
 }
 
 cmd_verify() {
@@ -136,7 +222,8 @@ cmd_verify() {
     echo "set DATA_DAY=YYYY-MM-DD" >&2
     exit 2
   fi
-  "$PY" "$ROOT/scripts/verify_same_db_pair.py" --db "$EVIDENCE_ROOT/live.sqlite" --data-day "$data_day"
+  assert_db_identity
+  "$PY" "$ROOT/scripts/verify_same_db_pair.py" --mode field --db "$EXPECTED_DB" --data-day "$data_day"
 }
 
 cmd_sim_check() {
@@ -151,11 +238,12 @@ cmd_sim_check() {
 
 cmd_status() {
   need_venv
+  assert_db_identity
   "$OBS" --config "$CONFIG" status
 }
 
 usage() {
-  sed -n '2,20p' "$0"
+  sed -n '2,28p' "$0"
 }
 
 case "${1:-}" in

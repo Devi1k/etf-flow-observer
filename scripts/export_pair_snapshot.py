@@ -1,5 +1,13 @@
 #!/usr/bin/env python3
-"""Export compact TSV snapshots from a live.sqlite into an evidence log dir."""
+"""Export compact TSV snapshots from a live.sqlite into an evidence log dir.
+
+Schema note (Dot 77144c6 review):
+  - ``authoritative`` lives on ``observations`` (current state), NOT on
+    ``observation_versions`` (historical rows).
+  - ``observations-versions.tsv`` is the historical snapshot: no authoritative.
+  - ``observations-latest.tsv`` joins current observation state to the latest
+    version only — authoritative there is current state, not rewritten history.
+"""
 
 from __future__ import annotations
 
@@ -23,30 +31,36 @@ def dump(conn: sqlite3.Connection, sql: str, path: Path) -> None:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser()
+    parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--db", type=Path, required=True)
     parser.add_argument("--out", type=Path, required=True)
     args = parser.parse_args()
+    if not args.db.is_file():
+        raise SystemExit(f"DB missing: {args.db}")
     conn = sqlite3.connect(args.db)
     conn.row_factory = sqlite3.Row
     try:
+        # Historical versions only — do NOT invent authoritative on this table.
         dump(
             conn,
             """
             SELECT fund_code, as_of_date, series, source_name, version_no, snapshot_phase,
                    original_value, standardized_value, quality_status, quality_flags,
-                   authoritative, first_seen_at, revised_at, fetched_at
+                   first_seen_at, revised_at, fetched_at, network_fetched_at,
+                   cache_accessed_at, observation_available_at, raw_fetch_id
             FROM observation_versions
             ORDER BY as_of_date, fund_code, series, version_no
             """,
             args.out / "observations-versions.tsv",
         )
+        # Current observation state + its latest version (authoritative = current).
         dump(
             conn,
             """
             SELECT o.fund_code, o.as_of_date, o.series, o.source_name, o.first_seen_at,
                    o.revised_at, o.authoritative, o.latest_version_no,
-                   v.snapshot_phase, v.quality_status, v.standardized_value
+                   v.snapshot_phase, v.quality_status, v.quality_flags, v.standardized_value,
+                   v.raw_fetch_id, v.network_fetched_at, v.cache_accessed_at
             FROM observations o
             JOIN observation_versions v
               ON v.observation_id = o.id AND v.version_no = o.latest_version_no
@@ -67,7 +81,8 @@ def main() -> int:
         dump(
             conn,
             """
-            SELECT id, source_name, http_status, fetched_at, network_fetched_at, from_cache, error, url
+            SELECT id, source_name, http_status, fetched_at, network_fetched_at,
+                   cache_accessed_at, from_cache, error, url
             FROM raw_fetches ORDER BY id
             """,
             args.out / "fetches.tsv",

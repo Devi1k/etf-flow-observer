@@ -40,6 +40,13 @@ DATA_DAY=2026-10-21 ./scripts/same_db_pair.sh verify
 
 配置模板：`config/same-db-pair.example.toml`（`db_path` 指向上述唯一库）。`scripts/same_db_pair.sh init` 会把 `config/example.toml` 的日历与宇宙拷过去并改写路径。
 
+## 验证退出码与缓存
+
+- `verify` / `morning` 后验证：`0` 通过，`1` 硬失败，`2` 用法或 **config db_path ≠ EVIDENCE_ROOT/live.sqlite**，`3` 待证据（未齐/不可判断；**不是**验收完成）。
+- 次晨采集固定加 `--no-cache`，避免默认 12h HTTP 缓存复用晚间响应；缓存访问时间不得升级为来源时间。
+- 导出：`observations-versions.tsv` 不含 `authoritative`（该列只在 `observations` 当前状态）；`observations-latest.tsv` 才带当前权威位。
+
+
 ## 回归测试（无网络）
 
 ```bash
