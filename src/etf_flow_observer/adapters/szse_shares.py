@@ -90,9 +90,11 @@ def parse_szse(payload: object, source_url: str) -> tuple[list[RawPoint], int, i
 def collect_szse(client, start: date, end: date, *, use_cache: bool) -> FetchBatch:
     points: list[RawPoint] = []
     errors: list[str] = []
+    notes: list[str] = []
     urls: list[str] = []
     page = 1
     page_count = 1
+    day_ok = False
     while page <= page_count:
         url = build_url(start, end, page)
         urls.append(url)
@@ -106,6 +108,7 @@ def collect_szse(client, start: date, end: date, *, use_cache: bool) -> FetchBat
         if result.error or result.status != 200:
             errors.append(f"SZSE 第 {page} 页失败: {result.error or result.status}")
             break
+        day_ok = True
         try:
             payload = result.json()
             parsed, page_no, page_count, row_errors = parse_szse(payload, result.url)
@@ -121,4 +124,11 @@ def collect_szse(client, start: date, end: date, *, use_cache: bool) -> FetchBat
         if page > 20:
             errors.append("SZSE 分页超过 20 页，停止")
             break
-    return FetchBatch(SOURCE, points, errors, [], urls)
+    # Empty-of-fund 200 (pre-publish) must not poison 12h cache for evening retry.
+    if day_ok and not points and not errors:
+        for url in urls:
+            n = client.forget_cached("GET", url)
+            if n:
+                notes.append(f"SZSE 空结果已取消缓存资格 urls={len(urls)}")
+                break
+    return FetchBatch(SOURCE, points, errors, notes, urls)

@@ -174,28 +174,52 @@ def check_pair(
             )
         )
 
-    # first_seen must match on each paired key (evening freeze preserved on morning append).
+    # first_seen freeze: EVERY version for the key (not only phase tip) must match observations.first_seen_at.
+    # Comparing only the last evening/morning tip misses mid-phase rewrite (v1=20:30, v2=20:35 drift).
     first_seen_ok = True
     first_seen_notes: list[str] = []
+    all_versions = conn.execute(
+        """
+        SELECT fund_code, series, source_name, snapshot_phase, version_no,
+               first_seen_at, observation_id
+        FROM observation_versions
+        WHERE as_of_date = ?
+        ORDER BY fund_code, series, source_name, version_no
+        """,
+        (data_day,),
+    ).fetchall()
+    freeze_by_obs: dict[int, str] = {}
+    for row in all_versions:
+        oid = int(row["observation_id"])
+        if oid not in freeze_by_obs:
+            obs = conn.execute(
+                "SELECT first_seen_at FROM observations WHERE id = ?", (oid,)
+            ).fetchone()
+            freeze_by_obs[oid] = obs["first_seen_at"] if obs else ""
+        freeze = freeze_by_obs[oid]
+        if row["first_seen_at"] != freeze:
+            first_seen_ok = False
+            first_seen_notes.append(
+                f"{row['fund_code']}:{row['series']}:{row['source_name']}:"
+                f"v{row['version_no']}/{row['snapshot_phase']} "
+                f"version_first_seen={row['first_seen_at']} obs_freeze={freeze}"
+            )
+    # Paired tips must also agree with each other (same freeze).
     for key in paired:
         e, m = evening_keys[key], morning_keys[key]
         if e["first_seen_at"] != m["first_seen_at"]:
             first_seen_ok = False
-            first_seen_notes.append(f"{key}: evening={e['first_seen_at']} morning={m['first_seen_at']}")
-        # Also must match observations.first_seen_at (logical freeze).
-        obs = conn.execute(
-            "SELECT first_seen_at FROM observations WHERE id = ?",
-            (e["observation_id"],),
-        ).fetchone()
-        if obs and obs["first_seen_at"] != e["first_seen_at"]:
-            first_seen_ok = False
-            first_seen_notes.append(f"{key}: obs.first_seen drifted from evening version")
-    if paired:
+            first_seen_notes.append(
+                f"{key}: tip evening={e['first_seen_at']} morning={m['first_seen_at']}"
+            )
+    if paired or all_versions:
         results.append(
             (
                 "first_seen_at_preserved_on_append",
                 PASS if first_seen_ok else FAIL,
-                "; ".join(first_seen_notes) if first_seen_notes else f"paired keys={len(paired)} first_seen match",
+                "; ".join(first_seen_notes)
+                if first_seen_notes
+                else f"versions={len(all_versions)} paired={len(paired)} first_seen freeze intact",
             )
         )
     else:
@@ -203,7 +227,7 @@ def check_pair(
             (
                 "first_seen_at_preserved_on_append",
                 PENDING if mode == "field" else FAIL,
-                "no paired keys to check first_seen freeze",
+                "no versions to check first_seen freeze",
             )
         )
 
@@ -296,7 +320,7 @@ def check_pair(
             ("morning_after_0800_next_natural_day", PENDING if mode == "field" else FAIL, "no morning rows")
         )
 
-    # ---- Raw response linkage + checkpoints (field strict) ----
+    # ---- Raw response linkage + checkpoints (existence ≠ match) ----
     raw_n = int(conn.execute("SELECT COUNT(*) AS n FROM raw_fetches").fetchone()["n"])
     cps = conn.execute(
         """
@@ -308,19 +332,73 @@ def check_pair(
         (f"%{data_day}%",),
     ).fetchall()
     statuses = {row["status"] for row in cps}
+    cp_by_key = {(r["source_name"], r["checkpoint_key"]): r for r in cps}
 
     linked = []
+    mismatched = []
     unlinked = []
     for row in list(evening_rows) + list(morning_rows):
         rid = row["raw_fetch_id"]
+        label = f"{row['fund_code']}:{row['snapshot_phase']}:{row['series']}"
         if rid is None:
-            unlinked.append(f"{row['fund_code']}:{row['snapshot_phase']}:{row['series']}")
+            unlinked.append(label)
             continue
-        exists = conn.execute("SELECT 1 FROM raw_fetches WHERE id = ?", (rid,)).fetchone()
-        if exists:
-            linked.append(rid)
-        else:
-            unlinked.append(f"{row['fund_code']}: missing raw id {rid}")
+        raw = conn.execute("SELECT * FROM raw_fetches WHERE id = ?", (rid,)).fetchone()
+        if raw is None:
+            unlinked.append(f"{label}: missing raw id {rid}")
+            continue
+        # Match: source, success status, and network time aligned with phase wall-clock rules.
+        if raw["source_name"] != row["source_name"]:
+            mismatched.append(f"{label}: raw source={raw['source_name']} != version source={row['source_name']}")
+            continue
+        if raw["http_status"] != 200 or raw["error"] is not None:
+            mismatched.append(
+                f"{label}: raw http={raw['http_status']} error={raw['error']!r} (not a success body)"
+            )
+            continue
+        raw_net = _parse_stamp(raw["network_fetched_at"] or raw["fetched_at"])
+        ver_net = _parse_stamp(row["network_fetched_at"] or row["fetched_at"])
+        if row["snapshot_phase"] == "evening":
+            if raw_net is None or raw_net.date() != day or raw_net < evening_floor:
+                mismatched.append(f"{label}: raw network time {raw['network_fetched_at']!r} not evening≥15:00")
+                continue
+        elif row["snapshot_phase"] == "morning":
+            if raw_net is None or raw_net.date() != day + timedelta(days=1) or raw_net < next_morning_floor:
+                mismatched.append(
+                    f"{label}: raw network time {raw['network_fetched_at']!r} not next-morning≥08:00"
+                )
+                continue
+        if ver_net and raw_net and ver_net != raw_net and not row["cache_accessed_at"]:
+            # Version source time should track the linked raw network time when not a cache access.
+            mismatched.append(
+                f"{label}: version network={row['network_fetched_at']!r} != raw network={raw['network_fetched_at']!r}"
+            )
+            continue
+        linked.append(rid)
+
+    # Phase-matched checkpoints: need evening AND morning keys for share sources when phases present.
+    share_sources = sorted(
+        {
+            r["source_name"]
+            for r in list(evening_rows) + list(morning_rows)
+            if r["series"] == "shares"
+        }
+    )
+    cp_mismatch = []
+    for source in share_sources:
+        for phase, present in (("evening", bool(evening_rows)), ("morning", bool(morning_rows))):
+            if not present:
+                continue
+            # checkpoint_key form: start:end:phase — accept any key containing data_day and ending with :phase
+            matches = [
+                r
+                for r in cps
+                if r["source_name"] == source
+                and r["checkpoint_key"].endswith(f":{phase}")
+                and data_day in r["checkpoint_key"]
+            ]
+            if not matches:
+                cp_mismatch.append(f"missing {source} checkpoint for phase={phase}")
 
     if mode == "field":
         if raw_n == 0 or not cps:
@@ -332,20 +410,30 @@ def check_pair(
                     "(fixture/unit path must use --mode fixture, not field)",
                 )
             )
+        elif cp_mismatch:
+            results.append(
+                (
+                    "raw_and_checkpoints_present",
+                    FAIL,
+                    f"checkpoints exist but phase-match failed: {cp_mismatch}; "
+                    f"raw={raw_n} checkpoints={len(cps)}",
+                )
+            )
         else:
             results.append(
                 (
                     "raw_and_checkpoints_present",
                     PASS,
-                    f"raw_fetches={raw_n} checkpoints={len(cps)} statuses={sorted(statuses)}",
+                    f"raw_fetches={raw_n} checkpoints={len(cps)} statuses={sorted(statuses)} "
+                    f"phase-matched sources={share_sources}",
                 )
             )
-        if (evening_rows or morning_rows) and unlinked:
+        if (evening_rows or morning_rows) and (unlinked or mismatched):
             results.append(
                 (
                     "raw_fetch_linkage",
                     FAIL,
-                    f"unlinked versions={unlinked[:8]}",
+                    f"unlinked={unlinked[:6]} mismatched={mismatched[:6]}",
                 )
             )
         elif evening_rows or morning_rows:
@@ -353,7 +441,7 @@ def check_pair(
                 (
                     "raw_fetch_linkage",
                     PASS,
-                    f"linked raw ids={sorted(set(linked))}",
+                    f"linked raw ids={sorted(set(linked))} (source/time/success matched)",
                 )
             )
         else:
@@ -370,7 +458,7 @@ def check_pair(
             (
                 "raw_fetch_linkage",
                 INFO,
-                f"fixture mode: linked={len(linked)} unlinked={len(unlinked)}",
+                f"fixture mode: linked={len(linked)} unlinked={len(unlinked)} mismatched={len(mismatched)}",
             )
         )
 
@@ -400,13 +488,13 @@ def check_pair(
         )
     )
 
-    # ---- 510310 abnormal jump: primary status abnormal_jump; provisional may stay in flags ----
-    # Missing fund / missing prior-day base → uncovered/undecidable, not hard FAIL of the pair.
+    # ---- 510310 jump isolation: evening snapshot vs morning status, NOT current authoritative ----
+    # Joining observations.authoritative conflates later morning recovery with evening jump.
+    BLOCKING = {"abnormal_jump", "suspect_split_or_merge"}
     jump_evening = conn.execute(
         """
-        SELECT v.quality_status, v.quality_flags, o.authoritative
+        SELECT v.quality_status, v.quality_flags, v.version_no, v.observation_id
         FROM observation_versions v
-        JOIN observations o ON o.id = v.observation_id
         WHERE v.as_of_date = ? AND v.fund_code = '510310' AND v.series = 'shares'
           AND v.snapshot_phase = 'evening'
         ORDER BY v.version_no DESC
@@ -414,6 +502,24 @@ def check_pair(
         """,
         (data_day,),
     ).fetchone()
+    jump_morning = conn.execute(
+        """
+        SELECT v.quality_status, v.quality_flags, v.version_no, v.observation_id
+        FROM observation_versions v
+        WHERE v.as_of_date = ? AND v.fund_code = '510310' AND v.series = 'shares'
+          AND v.snapshot_phase = 'morning'
+        ORDER BY v.version_no DESC
+        LIMIT 1
+        """,
+        (data_day,),
+    ).fetchone()
+    current_auth = None
+    if jump_evening is not None:
+        auth_row = conn.execute(
+            "SELECT authoritative FROM observations WHERE id = ?",
+            (jump_evening["observation_id"],),
+        ).fetchone()
+        current_auth = int(auth_row["authoritative"]) if auth_row else None
     prior = conn.execute(
         """
         SELECT quality_status FROM observation_versions
@@ -433,34 +539,37 @@ def check_pair(
             )
         )
     else:
-        flags = _parse_flags(jump_evening["quality_flags"])
-        status = jump_evening["quality_status"]
-        if status == "abnormal_jump":
-            auth_ok = int(jump_evening["authoritative"]) == 0
+        e_flags = _parse_flags(jump_evening["quality_flags"])
+        e_status = jump_evening["quality_status"]
+        m_status = jump_morning["quality_status"] if jump_morning else None
+        m_flags = _parse_flags(jump_morning["quality_flags"]) if jump_morning else []
+        # Evening blocking statuses are valid isolation; do NOT require current auth==0
+        # (morning revision may restore auth=1 while evening version stays abnormal_jump).
+        if e_status in BLOCKING:
             results.append(
                 (
                     "510310_jump_isolation",
-                    PASS if auth_ok else FAIL,
-                    f"primary={status} flags={flags} auth={jump_evening['authoritative']} "
-                    f"(provisional_evening may remain in flags)",
+                    PASS,
+                    f"evening primary={e_status} flags={e_flags}; "
+                    f"morning={m_status}; current_auth={current_auth} "
+                    f"(evening snapshot independent of later authoritative)",
                 )
             )
-        elif "no_adjacent_share" in flags or prior is None:
+        elif "no_adjacent_share" in e_flags or prior is None:
             results.append(
                 (
                     "510310_jump_isolation",
                     PENDING,
                     "uncovered/undecidable: missing prior-day base for jump check; "
-                    f"status={status} flags={flags}",
+                    f"evening={e_status} flags={e_flags}",
                 )
             )
-        elif status == "provisional_evening":
-            # No jump on this day — OK, not a forced fail.
+        elif e_status == "provisional_evening":
             results.append(
                 (
                     "510310_jump_isolation",
                     PASS,
-                    f"no abnormal_jump (status={status}); jump gate not triggered",
+                    f"evening no blocking jump (status={e_status}); morning={m_status}",
                 )
             )
         else:
@@ -468,7 +577,25 @@ def check_pair(
                 (
                     "510310_jump_isolation",
                     PASS,
-                    f"status={status} flags={flags} (no abnormal_jump on evening 510310)",
+                    f"evening={e_status} flags={e_flags}; morning={m_status}",
+                )
+            )
+
+        # Reverse leak: morning blocking status must not sit under authoritative=1.
+        if jump_morning is not None and m_status in BLOCKING and current_auth == 1:
+            results.append(
+                (
+                    "510310_morning_blocking_vs_authoritative",
+                    FAIL,
+                    f"morning primary={m_status} flags={m_flags} but observations.authoritative=1",
+                )
+            )
+        elif jump_morning is not None and m_status in BLOCKING:
+            results.append(
+                (
+                    "510310_morning_blocking_vs_authoritative",
+                    PASS,
+                    f"morning primary={m_status} with authoritative={current_auth}",
                 )
             )
 

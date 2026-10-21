@@ -209,6 +209,9 @@ class HttpClient:
 
         text = _decode(payload, response_headers)
         final_error = None if status == 200 and last_error == "" else _attempt_error(last_error, status, response_headers)
+        # Literally empty 200 bodies must not occupy the 12h success cache.
+        if status == 200 and final_error is None and not payload.strip():
+            self.store.invalidate_cache(fingerprint)
         return FetchResult(
             url=url,
             method=method,
@@ -223,6 +226,19 @@ class HttpClient:
             cache_accessed_at=None,
             request_started_at=request_started_at,
         )
+
+    def forget_cached(
+        self,
+        method: str,
+        url: str,
+        body: bytes | None = None,
+    ) -> int:
+        """Drop TTL eligibility for a prior network success (e.g. empty pre-publish body)."""
+        method = method.upper()
+        fingerprint = hashlib.sha256(
+            b"\n".join([method.encode(), url.encode(), body or b""])
+        ).hexdigest()
+        return self.store.invalidate_cache(fingerprint)
 
     def _attempt_delay(self, host: str, attempt: int) -> float:
         """两次真实请求至少间隔配置的最小间隔，重试不能比这个更短。"""

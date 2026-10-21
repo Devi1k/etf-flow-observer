@@ -5,45 +5,44 @@
 - **先前跨库证据不计**：`evidence/evening-20261016` + `evidence/morning-20261017`（`51c0f9e` / `9cdec31`）明确为独立空库，不能替代本项。
 - **未恢复**例程 `etf-a` / `etf-a-2`；本轮**未**跑真实晚间/次晨采集。
 
-## 墙钟与窗口（本修正提交时）
+## 墙钟与提交链（本修正）
 
 | 项 | 值 |
 | --- | --- |
-| 修正墙钟 | 2026-10-21 约 10:45+ Asia/Shanghai（仍早于晚间窗 15:00） |
-| 被审基线 | `77144c6`（Dot 正式审查：**暂不通过现场链路**） |
-| 本修正 tip | `5153c5fb538fb134a000d1ec855197ebf2c86b6f`（已推 `origin/evidence/same-db-evening-morning`） |
+| 修正墙钟 | 2026-10-21 约 11:10+ Asia/Shanghai（仍早于晚间窗 15:00） |
+| 被拒 tip（Dot 复审） | `00dfac8`（有实质进展，准备包仍未通过；禁止按此版启现场） |
+| 基线（相对） | `00dfac8` |
+| 本修正 tip | （见 git log / 推送后 SHA） |
 | 计划晚间腿 | 数据日 **2026-10-21**，当日 **15:00 之后**（修完并经 Dot 再审后才可跑） |
 | 计划次晨腿 | **2026-10-22** **08:00 之后**，同一 `live.sqlite` |
 | 分支 | `evidence/same-db-evening-morning` |
 
-因墙钟仍早于 15:00，且 Dot 要求先修 6 项再跑现场，**本目录不声称已完成 live 同库成对**。
+## Dot 对 `00dfac8` 复审六反例与本轮处置
 
-## Dot 对 `77144c6` 的 6 项结论与本轮处置
-
-| # | Dot 结论 | 本轮处置 | 状态 |
+| # | Dot 反例 | 本轮处置 | 状态 |
 | --- | --- | --- | --- |
-| 1 | 导出 SQL 从 `observation_versions` 读不存在的 `authoritative`；勿把当前权威位映射成历史事实 | `export_pair_snapshot.py`：versions TSV **无** authoritative；latest TSV 保留 **当前** observations.authoritative | **已修**（代码+`test_export_script_against_real_store_schema`） |
-| 2 | 验证器会误通过：未要求同键跨阶段；夹具可冒充现场 | `verify_same_db_pair.py`：`--mode field\|fixture`；field 强制四只同键配对、墙钟、raw/checkpoint、first_seen 冻结；fixture 明示非现场 | **已修**（正例+分属两阶段反例+缺 raw 反例） |
-| 3 | 验证器会误拒绝：跳变主状态应为 `abnormal_jump`；缺 510310/前日基数→未覆盖/不可判断 | 跳变隔离看 evening 主状态；`provisional_evening` 可留 flags；缺数 → `PENDING` 退出码 3，不假 PASS | **已修**（跳变正例+缺 510310 pending 例） |
-| 4 | 默认 12h 缓存可能晚间→次晨复用；不可把缓存访问时间升级为来源时间 | `same_db_pair.sh morning` 使用 `--no-cache`；校验器检查 cache 未提升为 source time；单测证明 TTL 内命中 vs `--no-cache` 取新；`waiting_update` 可重试 | **已修**（缓存单测+unpublished 重试） |
-| 5 | morning `\|\| true` 吞掉 verify 失败仍可能 exit 0 | 分别记录 `collect_exit_code` / `verify_exit_code`；verify 1→壳 exit 1，3→pending，0→0；collect≠0 优先 | **已修**（`test_same_db_pair_sh_morning_verify_fail_does_not_exit_0`） |
-| 6 | 可能采 A 库验 B 库 | 采集/验证前 `assert_db_identity`：config `db_path` 必须 resolve 到 `EVIDENCE_ROOT/live.sqlite`，否则 REFUSE exit 2；写 `continuity.txt` | **已修**（路径不一致反例） |
+| 1 | 完整晚间→空次晨→缺口检查看到旧晚间值，可能将 morning 记 complete，发布后重试在 HTTP 前跳过 | `record_expected_gaps(..., required_phase=)` + `Store.phase_value`；`finish_batch` 传入 `phase_override` | **已修反例**（`test_ce1_...` 实测 finish_batch/should_skip） |
+| 2 | 晚间 15:00 空 200 占 12h 缓存，挡住 20:00 已发布重试 | `cacheable` 列 + `invalidate_cache` / `HttpClient.forget_cached`；空 body 与 SSE/SZSE 无基金空结果取消缓存资格；`collect_sse` 路径空→有数据重试 | **已修反例**（`test_ce2_...` 真实调用 collect_sse） |
+| 3 | first_seen 只比每阶段 tip，晚间 v1 漂移、tip/次晨仍对齐可漏检 | 校验器核**全版本** `first_seen_at` 对 `observations.first_seen_at` 冻结 | **已修反例**（`test_ce3_...` 调 verify 脚本） |
+| 4 | 异常状态与当前 authoritative 混用；晚间 jump + 次晨恢复误失败；反向 morning jump+auth1 漏检 | 晚间快照独立判定；新增 `510310_morning_blocking_vs_authoritative`；覆盖 `suspect_split_or_merge` | **已修反例**（`test_ce4_...` 正例+反例） |
+| 5 | raw/checkpoint 仅查存在；错 source、HTTP500、仅晚间 checkpoint 仍可能 PASS | 逐腿匹配 source/成功状态/相位墙钟；双阶段 checkpoint 相位匹配 | **已修反例**（`test_ce5_...`） |
+| 6 | continuity.txt 起止 tee 同文件覆盖，丢失 refuse 证据 | `continuity-${leg}.txt` 分文件；`compare_pair_continuity`；`continuity-terminal.txt` 不覆盖 start/compare | **已修反例**（`test_ce6_...` 调 same_db_pair.sh） |
 
-### Dot 审查本身
+### 分类汇总（按 Dot 用语）
 
-| 项 | 状态 |
+| 分类 | 项 |
 | --- | --- |
-| 静态审查 `77144c6` | Dot 已做；**不通过**现场链路 |
-| Dot 独立跑测 | **未运行**（Dot 自述） |
-| 本方原报 67 passed | 仅证明 Store 回归；**不**证明 export/verify 脚本（Dot 正确指出） |
+| **静态已核**（上一轮 00dfac8 已核未回退） | 导出不分历史 authoritative；morning 传递 verify 失败/pending 退出码；配置库路径不一致拒绝；分属两阶段误通过已堵 |
+| **已修反例**（本轮） | 上表 1–6，均有代码 + 实测脚本/采集链测试 |
+| **未独立运行** | Dot 方独立跑测（待其复审本 tip） |
+| **live 未跑** | 真实同库 evening/morning collect；连续灰度；crontab；扩池；allow_trial；例程 etf-a / etf-a-2；正式连续观察；日报接入 |
 
-## 本轮已交付（修后）
+## 本轮已交付
 
-1. 脚本修复：`scripts/export_pair_snapshot.py`、`verify_same_db_pair.py`、`same_db_pair.sh`
-2. 新增脚本路径测试：`tests/test_same_db_pair_scripts.py`（**实际 subprocess 调用** export/verify/shell）
-3. 保留原 Store 回归：`tests/test_same_db_evening_morning.py`
-4. `sim-check` 仍为 **EXIT:2**（见 `sim-check.txt`）
-5. pytest：见 `pytest.txt` / `pytest-same-db.txt`
+1. 代码：`pipeline.py`、`storage.py`、`http_client.py`、`adapters/sse_shares.py`、`adapters/szse_shares.py`、`scripts/verify_same_db_pair.py`、`scripts/same_db_pair.sh`
+2. 测试：`tests/test_same_db_pair_scripts.py` 新增 CE1–CE6（实际调用 export/verify/shell/collect_sse/finish_batch）
+3. `sim-check` 仍为 **EXIT:2**（见 `sim-check.txt`）
+4. pytest：**89 passed**（见 `pytest.txt`）
 
 ### 退出码约定（verify / morning）
 
@@ -51,7 +50,7 @@
 | --- | --- |
 | 0 | 通过（field 验收意义下的 PASS） |
 | 1 | 硬失败 |
-| 2 | 用法错误 / DB 缺失 / 双路径不一致 |
+| 2 | 用法错误 / DB 缺失 / 双路径不一致 / continuity 路径拒绝 |
 | 3 | 待证据（pending / uncovered）；**不等于**验收完成 |
 
 ## 仍未运行 / 明确未做
@@ -74,4 +73,4 @@ git checkout evidence/same-db-evening-morning
 ./scripts/same_db_pair.sh sim-check   # 期望 EXIT:2
 ```
 
-现场一对仍须窗口内另跑，且首对不计正式连续观察。
+现场一对仍须窗口内另跑，且首对不计正式连续观察。不以 passed 数量替代反例闭环。

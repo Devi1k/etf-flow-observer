@@ -86,9 +86,12 @@ def collect_sse(client, days: list[date], *, page_size: int, use_cache: bool) ->
     for day in days:
         page = 1
         page_count = 1
+        day_urls: list[str] = []
+        day_ok = False
         while page <= page_count:
             url = build_url(day, page, page_size)
             urls.append(url)
+            day_urls.append(url)
             result = client.send(
                 "GET",
                 url,
@@ -99,6 +102,7 @@ def collect_sse(client, days: list[date], *, page_size: int, use_cache: bool) ->
             if result.error or result.status != 200:
                 errors.append(f"SSE {day.isoformat()} 第 {page} 页失败: {result.error or result.status}")
                 break
+            day_ok = True
             try:
                 payload = result.json()
             except json.JSONDecodeError as exc:
@@ -124,4 +128,13 @@ def collect_sse(client, days: list[date], *, page_size: int, use_cache: bool) ->
         missing = [code for code in SSE_SHARE_CODES if code not in found]
         if missing:
             notes.append(f"{day.isoformat()} 上交所结果里没有 {','.join(missing)}，不会记成 0")
+            # Pre-publish empty 200 must not occupy 12h cache and block evening retry.
+            if day_ok and not found:
+                for url in day_urls:
+                    n = client.forget_cached("GET", url)
+                    if n:
+                        notes.append(
+                            f"{day.isoformat()} 空结果已取消缓存资格 fingerprint-urls={len(day_urls)}"
+                        )
+                        break
     return FetchBatch(SOURCE, points, errors, notes, urls)

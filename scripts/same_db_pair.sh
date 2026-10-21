@@ -68,7 +68,7 @@ PY
 record_continuity() {
   local leg="$1" log="$2"
   need_venv
-  local meta="$log/continuity.txt"
+  local meta="$log/continuity-${leg}.txt"
   {
     echo "leg=$leg"
     echo "wall_clock=$(shanghai_now)"
@@ -90,6 +90,49 @@ if db.is_file():
 PY
     echo "git_sha=$(git -C "$ROOT" rev-parse HEAD)"
   } | tee "$meta"
+}
+
+# Compare evening-end identity to morning-start; keep refuse reason (not wiped by terminal stamp).
+compare_pair_continuity() {
+  local evening_end="$1" morning_start="$2" out="$3"
+  need_venv
+  {
+    echo "compare=evening-end_vs_morning-start"
+    echo "evening_end_file=$evening_end"
+    echo "morning_start_file=$morning_start"
+    if [[ ! -f "$evening_end" ]]; then
+      echo "refuse_reason=missing_evening_end_continuity"
+      echo "path_match=false"
+      return 1
+    fi
+    if [[ ! -f "$morning_start" ]]; then
+      echo "refuse_reason=missing_morning_start_continuity"
+      echo "path_match=false"
+      return 1
+    fi
+    local e_db m_db e_ino m_ino
+    e_db=$(grep -E '^resolved_db=' "$evening_end" | head -1 | cut -d= -f2-)
+    m_db=$(grep -E '^resolved_db=' "$morning_start" | head -1 | cut -d= -f2-)
+    e_ino=$(grep -E '^db_inode=' "$evening_end" | head -1 | cut -d= -f2-)
+    m_ino=$(grep -E '^db_inode=' "$morning_start" | head -1 | cut -d= -f2-)
+    echo "evening_end_db=$e_db"
+    echo "morning_start_db=$m_db"
+    echo "evening_end_inode=$e_ino"
+    echo "morning_start_inode=$m_ino"
+    if [[ -z "$e_db" || -z "$m_db" || "$e_db" != "$m_db" ]]; then
+      echo "refuse_reason=resolved_db_mismatch"
+      echo "path_match=false"
+      return 1
+    fi
+    if [[ -n "$e_ino" && -n "$m_ino" && "$e_ino" != "$m_ino" ]]; then
+      echo "refuse_reason=db_inode_mismatch"
+      echo "path_match=false"
+      return 1
+    fi
+    echo "refuse_reason="
+    echo "path_match=true"
+    return 0
+  } | tee "$out"
 }
 
 cmd_init() {
@@ -143,7 +186,7 @@ cmd_evening() {
     echo "git_sha=$(git -C "$ROOT" rev-parse HEAD)"
     echo "cmd=$OBS --config $CONFIG collect all --session evening --homepage-cross-check"
   } | tee "$log/run-meta.txt"
-  record_continuity evening "$log"
+  record_continuity evening-start "$log"
   set +e
   "$OBS" --config "$CONFIG" collect all --session evening --homepage-cross-check \
     >"$log/stdout.txt" 2>"$log/stderr.txt"
@@ -154,6 +197,7 @@ cmd_evening() {
   "$OBS" --config "$CONFIG" status >"$log/status.txt" || true
   "$PY" "$ROOT/scripts/export_pair_snapshot.py" --db "$EXPECTED_DB" --out "$log"
   record_continuity evening-end "$log"
+  cp "$log/continuity-evening-end.txt" "$EVIDENCE_ROOT/continuity-evening-end.txt"
   echo "evening leg done exit=$ec log=$log"
   exit "$ec"
 }
@@ -178,7 +222,25 @@ cmd_morning() {
     echo "note=MUST be natural next morning; Monday-for-Friday is backfill and does not count"
     echo "note=--no-cache required so 12h TTL cannot reuse evening response as morning source"
   } | tee "$log/run-meta.txt"
-  record_continuity morning "$log"
+  record_continuity morning-start "$log"
+  set +e
+  compare_pair_continuity \
+    "$EVIDENCE_ROOT/continuity-evening-end.txt" \
+    "$log/continuity-morning-start.txt" \
+    "$log/continuity-compare.txt"
+  compare_ec=$?
+  set -e
+  if [[ "$compare_ec" -ne 0 ]]; then
+    echo "REFUSE: evening-end vs morning-start continuity mismatch (see $log/continuity-compare.txt)" >&2
+    echo "compare_exit_code=$compare_ec" | tee -a "$log/run-meta.txt"
+    {
+      echo "terminal_state=refused_path_mismatch"
+      echo "compare_exit_code=$compare_ec"
+      echo "wall_clock=$(shanghai_now)"
+    } | tee "$log/continuity-terminal.txt"
+    record_continuity morning-end-refused "$log"
+    exit 2
+  fi
   set +e
   # Morning must not reuse evening HTTP body via the default 12h cache.
   "$OBS" --config "$CONFIG" collect all --session morning --homepage-cross-check --no-cache \
@@ -200,6 +262,13 @@ cmd_morning() {
   set -e
   echo "verify_exit_code=$verify_ec" | tee -a "$log/run-meta.txt"
   echo "data_day=$data_day" | tee -a "$log/run-meta.txt"
+  # Terminal stamp is a NEW file; does not overwrite start/compare refuse evidence.
+  {
+    echo "terminal_collect_exit=$collect_ec"
+    echo "terminal_verify_exit=$verify_ec"
+    echo "compare_path_match=true"
+    echo "wall_clock=$(shanghai_now)"
+  } | tee "$log/continuity-terminal.txt"
   record_continuity morning-end "$log"
   echo "morning leg done collect_exit=$collect_ec verify_exit=$verify_ec log=$log data_day=$data_day"
   # Distinguish collect failure / verify fail / pending / pass. Never exit 0 when verify failed.

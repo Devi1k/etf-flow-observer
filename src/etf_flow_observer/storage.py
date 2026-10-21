@@ -154,13 +154,14 @@ class Store:
         ("cache_accessed_at", "TEXT"),
         ("request_started_at", "TEXT"),
         ("attempt_no", "INTEGER NOT NULL DEFAULT 1"),
+        ("cacheable", "INTEGER NOT NULL DEFAULT 1"),
     )
     _OBSERVATION_VERSION_COLUMNS = (
         ("network_fetched_at", "TEXT"),
         ("cache_accessed_at", "TEXT"),
         ("observation_available_at", "TEXT"),
     )
-    SCHEMA_VERSION = 2
+    SCHEMA_VERSION = 3
 
     def __init__(self, db_path: Path, raw_dir: Path):
         self.db_path = Path(db_path)
@@ -277,10 +278,27 @@ class Store:
             SELECT * FROM raw_fetches
             WHERE fingerprint = ? AND from_cache = 0 AND error IS NULL
               AND http_status = 200 AND body_path IS NOT NULL
+              AND COALESCE(cacheable, 1) = 1
             ORDER BY id DESC LIMIT 1
             """,
             (fingerprint,),
         ).fetchone()
+
+    def invalidate_cache(self, fingerprint: str) -> int:
+        """Mark network successes for fingerprint non-cacheable (empty/pre-publish bodies).
+
+        Empty 200 responses must not poison the 12h TTL and block a later real publish.
+        """
+        cur = self.conn.execute(
+            """
+            UPDATE raw_fetches
+            SET cacheable = 0
+            WHERE fingerprint = ? AND from_cache = 0
+            """,
+            (fingerprint,),
+        )
+        self.conn.commit()
+        return int(cur.rowcount)
 
     def reserve_host(self, host: str, min_interval: float, now: datetime) -> float:
         row = self.conn.execute(
@@ -651,6 +669,28 @@ class Store:
             WHERE o.fund_code = ? AND o.as_of_date = ? AND o.series = ? AND o.source_name = ?
             """,
             (fund_code, as_of_date, series, source_name),
+        ).fetchone()
+
+    def phase_value(
+        self,
+        fund_code: str,
+        as_of_date: str,
+        series: str,
+        source_name: str,
+        snapshot_phase: str,
+    ):
+        """Latest version for an exact snapshot_phase (does not fall back to other phases)."""
+        return self.conn.execute(
+            """
+            SELECT v.standardized_value, v.quality_status, v.version_no, v.snapshot_phase,
+                   v.first_seen_at, v.raw_fetch_id, v.network_fetched_at, v.fetched_at
+            FROM observation_versions v
+            WHERE v.fund_code = ? AND v.as_of_date = ? AND v.series = ?
+              AND v.source_name = ? AND v.snapshot_phase = ?
+            ORDER BY v.version_no DESC
+            LIMIT 1
+            """,
+            (fund_code, as_of_date, series, source_name, snapshot_phase),
         ).fetchone()
 
     def summary_lines(self) -> list[str]:

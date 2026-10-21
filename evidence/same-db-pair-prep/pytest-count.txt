@@ -1,3 +1,1 @@
-80 passed
-full suite: 80 passed (67 prior Store/regressions + 13 new script-path tests)
-same-db files: 20 passed (7 store harness + 13 scripts)
+89 passed

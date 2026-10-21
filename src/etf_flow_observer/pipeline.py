@@ -380,18 +380,38 @@ def record_expected_gaps(
     days: list[date],
     now: datetime,
     reason_if_absent: str = "no_exchange_row",
+    required_phase: str | None = None,
 ) -> int:
-    """窗口里应有、但没有成功数值的日期记成缺口，不写成 0。"""
+    """窗口里应有、但没有成功数值的日期记成缺口，不写成 0。
+
+    required_phase: 若给定（如 morning/evening），只认该 snapshot_phase 的版本为覆盖。
+    否则晚间已写入的份额会让空次晨误记 complete，堵住发布后重试。
+    """
     added = 0
     for day in days:
         iso = day.isoformat()
         for fund in funds:
             ensure_known(fund)
             for item_series in series:
-                row = store.latest_join(fund, iso, item_series, source_name)
-                if row is not None and row["standardized_value"] is not None:
-                    continue
-                reason = reason_if_absent if row is None else row["quality_status"]
+                if required_phase:
+                    phase_row = store.phase_value(
+                        fund, iso, item_series, source_name, required_phase
+                    )
+                    if phase_row is not None and phase_row["standardized_value"] is not None:
+                        continue
+                    # 有别的阶段的值也不算本阶段覆盖；缺口原因仍区分「完全没有」与「仅有他阶段」。
+                    any_row = store.latest_join(fund, iso, item_series, source_name)
+                    if any_row is None:
+                        reason = reason_if_absent
+                    elif phase_row is None:
+                        reason = f"missing_phase:{required_phase}"
+                    else:
+                        reason = phase_row["quality_status"] or reason_if_absent
+                else:
+                    row = store.latest_join(fund, iso, item_series, source_name)
+                    if row is not None and row["standardized_value"] is not None:
+                        continue
+                    reason = reason_if_absent if row is None else row["quality_status"]
                 store.add_gap(
                     fund_code=fund,
                     as_of_date=iso,
@@ -477,6 +497,7 @@ def finish_batch(
         days=expected_days,
         now=now,
         reason_if_absent="fetch_failed" if batch.errors else "no_exchange_row",
+        required_phase=phase_override,
     )
     cross = []
     if batch.source_name == "huatai_nav_table":
