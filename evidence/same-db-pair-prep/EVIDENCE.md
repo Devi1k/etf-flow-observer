@@ -11,6 +11,7 @@
 | --- | --- |
 | 修正墙钟 | 2026-10-21 约 10:45+ Asia/Shanghai（仍早于晚间窗 15:00） |
 | 被审基线 | `77144c6`（Dot 正式审查：**暂不通过现场链路**） |
+| 本修正 tip | `5153c5fb538fb134a000d1ec855197ebf2c86b6f`（已推 `origin/evidence/same-db-evening-morning`） |
 | 计划晚间腿 | 数据日 **2026-10-21**，当日 **15:00 之后**（修完并经 Dot 再审后才可跑） |
 | 计划次晨腿 | **2026-10-22** **08:00 之后**，同一 `live.sqlite` |
 | 分支 | `evidence/same-db-evening-morning` |
