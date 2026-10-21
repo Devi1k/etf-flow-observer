@@ -11,7 +11,7 @@
 | 准备墙钟 | 2026-10-21 约 10:35 Asia/Shanghai（开盘后、**晚间窗 15:00 未开**） |
 | 计划晚间腿 | 数据日 **2026-10-21**，当日 **15:00 之后**，`--session evening` |
 | 计划次晨腿 | **2026-10-22**（周四）**08:00 之后**，同一 `live.sqlite`，`--session morning` |
-| 实现基线 | `origin/main` @ `789ac36`；本准备 tip **`f31a07b`**（内容主体 `c0f8dac`）（分支 `evidence/same-db-evening-morning`，已推 GitHub） |
+| 实现基线 | `origin/main` @ `789ac36`；分支 `evidence/same-db-evening-morning`（主体 `c0f8dac`，已推 GitHub；见该分支 tip） |
 
 因准备时刻早于 15:00，**本目录不声称已完成 live 同库成对**。live 成对需按 `docs/same-db-evening-morning.md` 在窗口内执行后另附日志。
 
