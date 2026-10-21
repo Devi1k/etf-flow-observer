@@ -599,20 +599,25 @@ def check_pair(
                 )
             )
 
-    # Evening shares that are NOT jumps should be provisional_evening primary.
-    # Do NOT require abnormal_jump rows to have primary provisional_evening.
-    non_jump_evening_shares = [
+    # Evening shares that are NOT blocking (abnormal_jump OR suspect_split_or_merge)
+    # should be provisional_evening primary. Unify with BLOCKING used above — do not
+    # only exempt abnormal_jump (that false-fails legitimate split/merge isolation).
+    non_blocking_evening_shares = [
         r
         for r in evening_rows
-        if r["series"] == "shares" and r["quality_status"] != "abnormal_jump"
+        if r["series"] == "shares" and r["quality_status"] not in BLOCKING
     ]
-    if non_jump_evening_shares:
-        provisional_ok = all(r["quality_status"] == "provisional_evening" for r in non_jump_evening_shares)
+    if non_blocking_evening_shares:
+        provisional_ok = all(
+            r["quality_status"] == "provisional_evening" for r in non_blocking_evening_shares
+        )
         results.append(
             (
-                "evening_shares_provisional_when_not_jump",
+                "evening_shares_provisional_when_not_blocking",
                 PASS if provisional_ok else FAIL,
-                f"non-jump evening share versions={len(non_jump_evening_shares)}; all provisional_evening → {provisional_ok}",
+                f"non-blocking evening share versions={len(non_blocking_evening_shares)}; "
+                f"all provisional_evening → {provisional_ok}; "
+                f"BLOCKING={sorted(BLOCKING)}",
             )
         )
 

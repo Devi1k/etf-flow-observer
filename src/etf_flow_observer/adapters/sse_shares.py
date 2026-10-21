@@ -129,12 +129,14 @@ def collect_sse(client, days: list[date], *, page_size: int, use_cache: bool) ->
         if missing:
             notes.append(f"{day.isoformat()} 上交所结果里没有 {','.join(missing)}，不会记成 0")
             # Pre-publish empty 200 must not occupy 12h cache and block evening retry.
+            # Clear EVERY page URL — breaking on first success leaves later pages stale.
             if day_ok and not found:
+                cleared = 0
                 for url in day_urls:
-                    n = client.forget_cached("GET", url)
-                    if n:
-                        notes.append(
-                            f"{day.isoformat()} 空结果已取消缓存资格 fingerprint-urls={len(day_urls)}"
-                        )
-                        break
+                    cleared += client.forget_cached("GET", url)
+                if cleared:
+                    notes.append(
+                        f"{day.isoformat()} 空结果已取消缓存资格 "
+                        f"cleared={cleared} fingerprint-urls={len(day_urls)}"
+                    )
     return FetchBatch(SOURCE, points, errors, notes, urls)

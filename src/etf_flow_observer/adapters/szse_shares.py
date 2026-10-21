@@ -125,10 +125,11 @@ def collect_szse(client, start: date, end: date, *, use_cache: bool) -> FetchBat
             errors.append("SZSE 分页超过 20 页，停止")
             break
     # Empty-of-fund 200 (pre-publish) must not poison 12h cache for evening retry.
+    # Clear EVERY page URL — breaking on first success leaves later pages stale.
     if day_ok and not points and not errors:
+        cleared = 0
         for url in urls:
-            n = client.forget_cached("GET", url)
-            if n:
-                notes.append(f"SZSE 空结果已取消缓存资格 urls={len(urls)}")
-                break
+            cleared += client.forget_cached("GET", url)
+        if cleared:
+            notes.append(f"SZSE 空结果已取消缓存资格 cleared={cleared} urls={len(urls)}")
     return FetchBatch(SOURCE, points, errors, notes, urls)

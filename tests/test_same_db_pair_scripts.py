@@ -721,6 +721,74 @@ def test_ce2_evening_empty_response_cache_does_not_block_later_fetch(tmp_path: P
     store.close()
 
 
+def test_ce2_multi_page_empty_response_clears_all_page_caches(tmp_path: Path):
+    """CE2 multi-page: empty pageCount=2 must invalidate BOTH page fingerprints.
+
+    Single-page CE2 remains valid; this proves pagination empty-cache invalidation
+    does not break after the first successful forget_cached.
+    """
+    from etf_flow_observer.adapters.sse_shares import collect_sse
+
+    store = Store(tmp_path / "cache.sqlite", tmp_path / "raw")
+    clock = {"now": shanghai(2026, 10, 21, 15, 5)}
+    calls = {"n": 0}
+    empty_p1 = b'{"pageHelp":{"pageNo":1,"pageCount":2},"result":[]}'
+    empty_p2 = b'{"pageHelp":{"pageNo":2,"pageCount":2},"result":[]}'
+    full_p1 = (
+        b'{"pageHelp":{"pageNo":1,"pageCount":2},"result":['
+        b'{"SEC_CODE":"510300","TOT_VOL":"100","SEC_NAME":"A","STAT_DATE":"2026-10-21"},'
+        b'{"SEC_CODE":"510310","TOT_VOL":"100","SEC_NAME":"B","STAT_DATE":"2026-10-21"}'
+        b"]}"
+    )
+    full_p2 = (
+        b'{"pageHelp":{"pageNo":2,"pageCount":2},"result":['
+        b'{"SEC_CODE":"510330","TOT_VOL":"100","SEC_NAME":"C","STAT_DATE":"2026-10-21"}'
+        b"]}"
+    )
+    # First collect: empty p1+p2; second: full p1+p2
+    bodies = [empty_p1, empty_p2, full_p1, full_p2]
+
+    def transport(method, url, headers, body):
+        idx = min(calls["n"], len(bodies) - 1)
+        payload = bodies[idx]
+        calls["n"] += 1
+        return 200, Message(), payload
+
+    client = HttpClient(
+        store,
+        user_agent="test",
+        min_interval_seconds=0,
+        timeout_seconds=5,
+        max_retries=1,
+        cache_ttl_seconds=43200,
+        max_http_requests=20,
+        sleeper=lambda _s: None,
+        clock=lambda: clock["now"],
+        transport=transport,
+    )
+    day = date.fromisoformat(DATA_DAY)
+    first = collect_sse(client, [day], page_size=10, use_cache=True)
+    assert first.points == []
+    assert calls["n"] == 2, f"expected 2 empty page fetches, got {calls['n']}"
+    assert any("空结果已取消缓存" in n for n in first.notes)
+    assert any("cleared=" in n for n in first.notes)
+    # Both page fingerprints must be non-cacheable.
+    rows = store.conn.execute(
+        "SELECT fingerprint, cacheable FROM raw_fetches WHERE from_cache = 0 ORDER BY id"
+    ).fetchall()
+    assert len(rows) >= 2
+    assert all(int(r["cacheable"]) == 0 for r in rows), rows
+
+    clock["now"] = shanghai(2026, 10, 21, 20, 30)
+    second = collect_sse(client, [day], page_size=10, use_cache=True)
+    assert calls["n"] == 4, (
+        f"both empty pages must be re-fetched (got {calls['n']} calls); "
+        "stale later-page cache would keep call count at 3"
+    )
+    assert {p.fund_code for p in second.points} >= {"510300", "510310", "510330"}
+    store.close()
+
+
 def test_ce3_first_seen_rewrite_on_non_tip_version_is_detected(tmp_path: Path):
     """CE3: drifting first_seen on evening v1 while tip v2 matches still must FAIL."""
     db = tmp_path / "live.sqlite"
@@ -829,17 +897,97 @@ def test_ce4_morning_blocking_with_auth1_is_fail(tmp_path: Path):
     assert "FAIL\t510310_morning_blocking_vs_authoritative" in field.stdout
 
 
-def test_ce5_raw_wrong_source_or_http_fail_is_mismatch(tmp_path: Path):
-    """CE5: raw row exists but wrong source / HTTP 500 / evening time on morning → FAIL match."""
+
+def test_ce4_suspect_split_or_merge_isolation_positive(tmp_path: Path):
+    """CE4 positive: prior=99, evening=morning=160 → suspect_split_or_merge; auth=0 must PASS.
+
+    Must NOT false-fail evening_shares_provisional_when_not_blocking — blocking statuses
+    (abnormal_jump AND suspect_split_or_merge) are exempt from provisional_evening primary.
+    """
+    db = tmp_path / "live.sqlite"
+    store = Store(db, tmp_path / "raw")
+    # |160-99|/99 ≈ 0.616 ≥ split_ratio 0.50 → suspect_split_or_merge (not abnormal_jump)
+    _seed_pair(
+        store,
+        evening_values={"510300": "100", "510310": "160", "510330": "100", "159919": "100"},
+        morning_values={"510300": "100", "510310": "160", "510330": "100", "159919": "100"},
+    )
+    evening = store.conn.execute(
+        """
+        SELECT quality_status FROM observation_versions
+        WHERE fund_code='510310' AND as_of_date=? AND series='shares' AND snapshot_phase='evening'
+        ORDER BY version_no DESC LIMIT 1
+        """,
+        (DATA_DAY,),
+    ).fetchone()
+    morning = store.conn.execute(
+        """
+        SELECT quality_status FROM observation_versions
+        WHERE fund_code='510310' AND as_of_date=? AND series='shares' AND snapshot_phase='morning'
+        ORDER BY version_no DESC LIMIT 1
+        """,
+        (DATA_DAY,),
+    ).fetchone()
+    obs = store.get_observation("510310", DATA_DAY, "shares", "sse_shares")
+    assert evening["quality_status"] == "suspect_split_or_merge", evening["quality_status"]
+    assert morning["quality_status"] == "suspect_split_or_merge", morning["quality_status"]
+    assert int(obs["authoritative"]) == 0
+    store.close()
+    field = _run([str(PY), str(VERIFY), "--mode", "field", "--db", str(db), "--data-day", DATA_DAY])
+    assert field.returncode == 0, field.stdout
+    assert "PASS\t510310_jump_isolation" in field.stdout
+    assert "PASS\tevening_shares_provisional_when_not_blocking" in field.stdout
+    assert "FAIL\tevening_shares_provisional_when_not_blocking" not in field.stdout
+    assert "FAIL\tevening_shares_provisional_when_not_jump" not in field.stdout
+
+
+def test_ce5_raw_wrong_source_alone_is_mismatch(tmp_path: Path):
+    """CE5 independent negative #1: wrong source only (HTTP 200, correct morning clock)."""
     db = tmp_path / "live.sqlite"
     store = Store(db, tmp_path / "raw")
     _seed_pair(store)
-    # Corrupt one morning raw: point version at a 500 / wrong-source raw.
     bad_id = store.save_raw(
         source_name="wrong_source",
-        fingerprint="bad-fp",
+        fingerprint="bad-fp-source",
         method="GET",
-        url="https://example.test/bad",
+        url="https://example.test/bad-source",
+        request_body=None,
+        http_status=200,
+        body=b'{"ok":true}',
+        fetched_at=MORNING,
+        from_cache=False,
+        error=None,
+        network_fetched_at=MORNING,
+    )
+    store.conn.execute(
+        """
+        UPDATE observation_versions SET raw_fetch_id = ?
+        WHERE as_of_date = ? AND fund_code = '510300' AND snapshot_phase = 'morning' AND series = 'shares'
+        """,
+        (bad_id, DATA_DAY),
+    )
+    store.conn.commit()
+    store.close()
+    field = _run([str(PY), str(VERIFY), "--mode", "field", "--db", str(db), "--data-day", DATA_DAY])
+    assert field.returncode == 1, field.stdout
+    assert "FAIL\traw_fetch_linkage" in field.stdout
+    assert "raw source=wrong_source" in field.stdout
+
+
+def test_ce5_raw_http_500_alone_is_mismatch(tmp_path: Path):
+    """CE5 independent negative #2: HTTP 500 only (correct source, correct morning clock).
+
+    Source is checked first in verify; this case keeps source=sse_shares so the 500
+    path is reached and proven independently of wrong-source.
+    """
+    db = tmp_path / "live.sqlite"
+    store = Store(db, tmp_path / "raw")
+    _seed_pair(store)
+    bad_id = store.save_raw(
+        source_name="sse_shares",
+        fingerprint="bad-fp-500",
+        method="GET",
+        url="https://example.test/sse-500",
         request_body=None,
         http_status=500,
         body=b"err",
@@ -860,7 +1008,47 @@ def test_ce5_raw_wrong_source_or_http_fail_is_mismatch(tmp_path: Path):
     field = _run([str(PY), str(VERIFY), "--mode", "field", "--db", str(db), "--data-day", DATA_DAY])
     assert field.returncode == 1, field.stdout
     assert "FAIL\traw_fetch_linkage" in field.stdout
-    assert "mismatched=" in field.stdout
+    assert "raw http=500" in field.stdout
+    assert "raw source=wrong_source" not in field.stdout
+
+
+def test_ce5_raw_wrong_phase_clock_alone_is_mismatch(tmp_path: Path):
+    """CE5 independent negative #3: wrong phase clock only (correct source, HTTP 200).
+
+    Morning version linked to a raw whose network time is evening-of-data-day (EVENING),
+    not next-morning ≥08:00 — proves the clock arm independently of source/HTTP checks.
+    """
+    db = tmp_path / "live.sqlite"
+    store = Store(db, tmp_path / "raw")
+    _seed_pair(store)
+    bad_id = store.save_raw(
+        source_name="sse_shares",
+        fingerprint="bad-fp-clock",
+        method="GET",
+        url="https://example.test/sse-wrong-clock",
+        request_body=None,
+        http_status=200,
+        body=b'{"ok":true}',
+        fetched_at=EVENING,  # evening-of-data-day, NOT morning
+        from_cache=False,
+        error=None,
+        network_fetched_at=EVENING,
+    )
+    store.conn.execute(
+        """
+        UPDATE observation_versions SET raw_fetch_id = ?
+        WHERE as_of_date = ? AND fund_code = '510300' AND snapshot_phase = 'morning' AND series = 'shares'
+        """,
+        (bad_id, DATA_DAY),
+    )
+    store.conn.commit()
+    store.close()
+    field = _run([str(PY), str(VERIFY), "--mode", "field", "--db", str(db), "--data-day", DATA_DAY])
+    assert field.returncode == 1, field.stdout
+    assert "FAIL\traw_fetch_linkage" in field.stdout
+    assert "not next-morning" in field.stdout
+    assert "raw source=wrong_source" not in field.stdout
+    assert "raw http=500" not in field.stdout
 
 
 def test_ce5_evening_checkpoint_only_fails_phase_match(tmp_path: Path):
