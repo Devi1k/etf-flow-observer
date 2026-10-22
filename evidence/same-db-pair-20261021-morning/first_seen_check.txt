@@ -1,0 +1,10 @@
+preexisting_id=1
+before_first_seen_at=2026-10-21T15:16:33+08:00
+before_inode=103510
+before_size=73728
+after_first_seen_at=2026-10-21T15:16:33+08:00
+after_inode=103510
+after_size=86016
+first_seen_unchanged=True
+inode_unchanged=True
+row_count_after=14

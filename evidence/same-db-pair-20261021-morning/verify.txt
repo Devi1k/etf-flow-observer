@@ -1,0 +1,16 @@
+INFO	mode	field
+PENDING	evening_versions_present	evening observation_versions rows=0
+PASS	morning_versions_present	morning observation_versions rows=13
+PASS	no_backfill_for_this_pair	backfill rows for data-day=0 (Friday→Monday backfill does not count)
+PENDING	same_key_phase_pairing	paired=0 evening_only=0 morning_only=13
+PASS	first_seen_at_preserved_on_append	versions=13 paired=0 first_seen freeze intact
+PENDING	four_fund_shares_paired	paired_share_funds=[]; missing=['510300', '510310', '510330', '159919']
+PENDING	evening_after_1500_data_day	no evening rows
+PASS	morning_after_0800_next_natural_day	all morning network/fetched_at on next natural day ≥08:00
+PASS	raw_and_checkpoints_present	raw_fetches=21 checkpoints=12 statuses=['complete', 'incomplete', 'waiting_update'] phase-matched sources=['sse_shares', 'szse_shares']
+PASS	raw_fetch_linkage	linked raw ids=[11, 12, 13, 14, 15, 16, 21] (source/time/success matched)
+PASS	checkpoint_status_vocabulary	seen ['complete', 'incomplete', 'waiting_update']
+PASS	no_fabricated_zero_shares	zero-like share versions=0
+PENDING	510310_jump_isolation	uncovered/undecidable: no evening 510310 shares row for this data-day
+PASS	cache_access_not_promoted_to_source_time	suspect rows=0
+summary	passed=9	failed=0	pending=5	mode=field
